@@ -149,3 +149,30 @@ alert condition.
 
 - No rule shows positive expectancy. H8 not evaluable (n=5). 44% of "buy everything eligible" trades ended in a
   liquidity pull. v1 rule pre-registered in HYPOTHESES.md; to be tested on fresh data only.
+
+### Out-of-sample test of the pre-registered v1 rule - run 3 (recorded 06:17-08:04 UTC, after registration)
+
+Run exactly as registered, no rule changes. Fresh data: 107 min, 1644 tokens seen, 134 passed v0 filters.
+
+| Rule | trades | win | mean net | 90% CI | mean net, costs +50% | 90% CI (+50%) |
+|---|---|---|---|---|---|---|
+| v0 (bot as is) | 7 | 43% | +3.3% | [-9.5%, +18.8%] | +2.2% | [-10.5%, +17.7%] |
+| **v1** (registered rule) | **6** | 33% | +2.6% | [-10.2%, +21.7%] | +1.5% | [-11.2%, +20.6%] |
+| v1_filters_only | 7 | 29% | +6.0% | [-9.1%, +27.3%] | +4.9% | [-10.2%, +26.2%] |
+| all v0-eligible | 83 | 24% | **-31.0%** | [-41.2%, -20.4%] | -31.8% | [-42.0%, -21.2%] |
+
+**Verdict against the fixed criteria: v1 FAILS / inconclusive - not deployed.**
+- n = 6, below the required 30.
+- v1 did not beat v0 by >= 3 pp (+2.6% vs +3.3%); it beat all_eligible by ~34 pp.
+- CI lower bound is far below 0 (with and without +50% costs). Nothing here is evidence of profitability.
+- Run 1 half 2 (the protocol's secondary check) is not evaluable: every rule entry in that half was too recent
+  for 60 min follow-up.
+
+What the run does show (descriptive, n is large only for all_eligible):
+- Buying every coin that passes v0's static filters lost **-31% per trade**; 46 of 83 exits (55%) were liquidity
+  pulls. The filtered universe is dominated by rugs, consistent with runs 1-2.
+- The scoring/safety layers (v0, v1) avoided almost all of that: their 6-7 trades had no liquidity-collapse
+  exits. That is the one consistent signal across runs, but it rests on tiny samples.
+- Sample-size arithmetic: v0/v1 fire ~3-4 resolvable trades per recorded hour, so >= 30 trades needs roughly
+  8-10 hours of recording, and a CI narrow enough to separate +3% from 0 needs several hundred trades (multi-day).
+  Next: keep recording fresh runs (run 4 started 09:47 UTC) and pool all post-registration runs for one evaluation.
