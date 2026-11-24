@@ -89,3 +89,52 @@ Round trip (buy then immediately sell, quotes only) by trade size and pool liqui
   tolerance invites sandwiching up to that amount). These need tiny live tests, only with approval.
 - Implication: at ~2% round trip plus a 10% stop, a strategy needs a substantial edge per trade; trade
   size should stay small relative to liquidity.
+
+## First recorder results (cycle 3) - FIRST HALF ONLY, per pre-registered protocol
+
+Data: `market-run1.db` (1.1h, ~1,150 tokens) and `market-run2.db` (1.2h, ~1,250 tokens, adds Jupiter stats),
+recorded concurrently on 2026-11-24 04:10-05:30 UTC. **The two runs cover the same hour, so run 2 is not an
+independent replication.** One market regime only. Second halves not yet examined.
+
+### Data-quality finding (fixed before any conclusion)
+The first pass showed +18% expectancy for v0-eligible coins. It was an artifact: after a pool's liquidity is
+pulled, DexScreener keeps the last traded price (stale) and tiny trades in drained pools print phantom prices
+(e.g. $0.0000149 -> $0.311 with $84 liquidity). Raw responses confirmed real drains (SOL side ~1e-7 SOL).
+Studies now treat pools under $2k liquidity as untradeable (never credit a gain; value capped at the SOL side).
+
+### Base rates (first half, 60-minute outcomes)
+| Universe | n | dumped >=50% in 60m | ran >=50% in 60m | median return 60m | v0 exits, mean |
+|---|---|---|---|---|---|
+| Every newly seen token (run 1) | 470 | 31% | 10% | -1.5% | -11.7% |
+| Tokens passing v0 static filters (run 1) | 38-49 | **82%** | 37% | **-77%** | -9.0% |
+| Tokens passing v0 static filters (run 2) | 45-50 | **84%** | 40% | **-82%** | -12.5% |
+
+- Among v0-eligible coins, 41/41 young (<30 min) pools had Jupiter organic score **< 10 ("low")**: activity is
+  bot / wash-driven. 92% of them dumped >=50% within an hour; about half spiked >=50% first (pump-and-dump).
+- v0's static filters on brand-new pools (>= $15k liquidity, rising volume, buys > sells) select mainly
+  **manufactured-activity pools that are then drained**. v0's RugCheck step rejects most (42 of 50 were
+  RugCheck "danger"); the entry replay measures the remainder.
+
+### Pre-registered hypotheses - first-half verdicts
+| ID | Verdict (half 1) | Evidence |
+|---|---|---|
+| H1 chasing | **supported** | 1h change >100%: dump 51%, v0 exp ~-8.5% (n=53) vs 0-100%: dump 35%, exp ~-2.8% (n=187) |
+| H2 wash (Gecko tx/trader > 4) | **supported on dump rate** | dump 42% (n=109) vs 30% (n=350); expectancy not different |
+| H2 wash (Jupiter organic) | not testable as a contrast | every eligible coin was "low" - no comparison group yet |
+| H3 serial deployers | not evaluable | buckets n < 30 |
+| H4 concentration | not evaluable | buckets n < 30 |
+| H5 real participation | not evaluable | no coin met the criteria |
+| H6 liquidity pulls | not evaluable | no data in window |
+| H7 paid promotion | **not supported** | boosted n=16 (< 30) and direction opposite (6% vs 32% dump) |
+| H8 forming-candle fix | pending | entry replay |
+| H9 very young pairs | **supported** | < 30 min: 34% dump (n=434) vs older: ~7% (n=56) |
+
+Exploratory (not pre-registered, must be confirmed on fresh data): RugCheck "danger" tokens dumped 82% vs 16% for
+"ok" (n=60 vs 33) in the full universe.
+
+### New reliability finding
+**Stale price after liquidity removal hides rugs from the stop loss.** When a pool is drained, DexScreener keeps
+reporting the last traded price, so a price-only stop never fires and the position looks healthy while worthless.
+The old paper broker would even "sell" at that stale price (understating rug losses). Quote-based paper fills fail
+correctly (no route). Fix needed: monitor pool liquidity for every open position and treat a collapse as an exit /
+alert condition.
