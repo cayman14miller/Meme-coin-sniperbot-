@@ -56,3 +56,24 @@ def test_parabolic_early_penalised():
 def test_exit_on_dump():
     p = make_pair(buys={"m5": 5}, sells={"m5": 60})
     assert exit_signal(p, uptrend(), 1.0).exit
+
+
+def test_v1_caps_unconfirmed_trend():
+    closes = [c.close for c in uptrend()]
+    flat_vol = candles_from_closes(closes, [1000] * len(closes))  # trend shape, no volume expansion
+    weak = make_pair(buys={"m5": 40, "h1": 300}, sells={"m5": 40, "h1": 300})  # no buy pressure
+    v0 = analyze(weak, flat_vol, ["momentum"])
+    v1 = analyze(weak, flat_vol, ["momentum"], version="v1")
+    assert v0.score >= 65, v0.reasons  # v0 would buy on trend indicators alone
+    assert v1.score == 40 and any("capped at 40" in r for r in v1.reasons)
+
+
+def test_v1_keeps_confirmed_momentum():
+    a = analyze(make_pair(), uptrend(), ["momentum"], version="v1")
+    assert a.score >= 65, a.reasons
+
+
+def test_v1_drops_forming_candle():
+    cs = uptrend()
+    a = analyze(make_pair(), cs, ["momentum"], version="v1", now=cs[-1].ts + 30)
+    assert a.metrics["n"] == len(cs) - 1

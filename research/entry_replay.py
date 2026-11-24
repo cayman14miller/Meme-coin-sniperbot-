@@ -75,7 +75,17 @@ def rule_v0(ctx) -> tuple[bool, float, str, list[str]]:
     return a.score >= 65, a.score, a.strategy, a.reasons
 
 
-RULES = {"v0": rule_v0, "all_eligible": rule_all_eligible}
+def rule_v1_scoring(ctx) -> tuple[bool, float, str, list[str]]:
+    """H8: v0 with completed candles only + volume/buy-pressure confirmation."""
+    sf = ctx["safety"]
+    if sf is None or not sf["ok"] or (sf["score"] or 0) > 5000:
+        return False, 0.0, "rejected", ["safety"]
+    completed = [c for c in ctx["candles"] if c.ts + 60 <= ctx["snap"]["ts"]]
+    a = analyze(ctx["pair"], completed, ["early", "momentum", "dip", "breakout"], version="v1", now=ctx["snap"]["ts"])
+    return a.score >= 65, a.score, a.strategy, a.reasons
+
+
+RULES = {"v0": rule_v0, "all_eligible": rule_all_eligible, "v1_scoring": rule_v1_scoring}
 
 
 # --------------------------------------------------------------------------- exits & costs

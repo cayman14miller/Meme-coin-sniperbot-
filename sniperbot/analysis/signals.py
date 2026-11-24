@@ -201,13 +201,38 @@ STRATEGIES = {
 }
 
 
-def analyze(p: PairInfo, candles: list[Candle], enabled: Iterable[str]) -> Analysis:
+def _confirm_cap(r: StrategyScore, p: PairInfo, candles: list[Candle]) -> None:
+    """v1: trend/chart shape alone cannot reach a buy score - require volume AND buy-pressure confirmation."""
+    if r.name not in ("momentum", "breakout") or len(candles) < 25:
+        return
+    vols = [x.volume for x in candles]
+    vol_ok = sum(zscore(vols[: len(vols) - i], 20) for i in range(3)) / 3 >= 1.0
+    if r.name == "breakout":
+        prior = candles[-21:-1]
+        avg = sum(x.volume for x in prior) / len(prior)
+        vol_ok = vol_ok or (avg > 0 and candles[-1].volume >= 1.5 * avg)
+    buy_ok = p.buy_sell_ratio("m5") >= 1.2
+    cap = 100 if (vol_ok and buy_ok) else 60 if (vol_ok or buy_ok) else 40
+    if r.score > cap:
+        r.reasons.append(f"capped at {cap}: volume {'ok' if vol_ok else 'unconfirmed'}, "
+                         f"buy pressure {'ok' if buy_ok else 'unconfirmed'}")
+        r.score = cap
+
+
+def analyze(p: PairInfo, candles: list[Candle], enabled: Iterable[str], version: str = "v0",
+            now: float | None = None) -> Analysis:
+    """version "v0": original scoring. "v1": ignores the still-forming candle (its partial volume made
+    every momentum read look like falling volume) and requires confirmation (see _confirm_cap)."""
+    if version == "v1" and candles and now is not None and candles[-1].ts + 60 > now:
+        candles = candles[:-1]
     m = chart_metrics(candles)
     results = [STRATEGIES[name](p, candles, m) for name in enabled if name in STRATEGIES]
     if not results:
         return Analysis(0, "none", ["no strategies enabled"], {}, m)
     for r in results:
         r.score = _clamp(r.score)
+        if version == "v1":
+            _confirm_cap(r, p, candles)
     best = max(results, key=lambda r: r.score)
     return Analysis(best.score, best.name, best.reasons, {r.name: r.score for r in results}, m)
 
