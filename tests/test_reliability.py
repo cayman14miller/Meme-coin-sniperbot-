@@ -240,3 +240,17 @@ def test_old_database_is_migrated(tmp_path):
     con.close()
     st = Store(str(db))
     assert "entry_liq" in {r[1] for r in st.conn.execute("PRAGMA table_info(positions)")}
+
+
+def test_safety_cache_is_bounded():
+    from sniperbot.data.market import MarketData
+
+    class Rug(MarketData):
+        async def _get(self, url, limiter, params=None):
+            return {"score": 1, "risks": []}
+    md = Rug.__new__(Rug)
+    md._safety_cache, md.rug_limit = {}, None
+    old = time.time() - 3600
+    md._safety_cache.update({f"old{i}": (old, None) for i in range(2500)})
+    run(md.safety("fresh", 5000))
+    assert len(md._safety_cache) == 1 and "fresh" in md._safety_cache

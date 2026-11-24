@@ -248,7 +248,11 @@ class MarketData:
         elif score > max_score:
             ok, reason = False, f"risk score {score} > {max_score}"
         rep = SafetyReport(ok, score, names, reason)
-        self._safety_cache[mint] = (time.time(), SafetyReport(not danger, score, names, reason))
+        now = time.time()
+        self._safety_cache[mint] = (now, SafetyReport(not danger, score, names, reason))
+        if len(self._safety_cache) > 2000:  # bounded for multi-day runs: drop entries past their 10-min TTL
+            for k in [k for k, (t, _) in self._safety_cache.items() if now - t >= 600]:
+                del self._safety_cache[k]
         return rep
 
     async def jup_quote(self, input_mint: str, output_mint: str, amount: int, slippage_bps: int):

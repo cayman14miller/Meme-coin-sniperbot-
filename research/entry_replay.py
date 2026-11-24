@@ -122,6 +122,9 @@ RULES = {"v0": rule_v0, "all_eligible": rule_all_eligible, "v1_scoring": rule_v1
 
 
 # --------------------------------------------------------------------------- exits & costs
+COST_STRESS = 1.5  # pre-registered sensitivity: results must also hold with costs +50%
+
+
 def trade_cost(dex: str, liq: float, size_usd: float) -> float:
     fee = POOL_FEE.get(dex or "", DEFAULT_POOL_FEE)
     impact = size_usd / (liq / 2) if liq else 0.05
@@ -245,6 +248,7 @@ def main(db: str, rules: list[str], size: float, half: int | None = None) -> Non
         print(f"\n=== rule {rn}: fired {fired[rn]} times, {len(ts)} with >=60m follow-up, "
               f"{unresolved[rn]} too recent to judge ===")
         summarize("all", ts)
+        summarize("all, costs +50%", [dict(x, net=x["gross"] - COST_STRESS * x["cost"]) for x in ts])
         if len(ts) >= 4 and not half:
             mid = ts[len(ts) // 2]["t"]
             summarize("first half (design)", [x for x in ts if x["t"] < mid])
