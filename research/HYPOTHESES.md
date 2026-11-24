@@ -49,3 +49,11 @@ against `v0` and `all_eligible` on the same data, with entries that have >= 60 m
 and the drained-pool rule. v1 is considered better only if it has >= 30 trades and its mean net return exceeds
 v0's and all_eligible's by >= 3 percentage points; it is considered *profitable* only if the lower bound of the
 90% bootstrap CI of its mean is above 0 - with costs +50% as well. Otherwise it is not deployed.
+
+### Amendment - 2026-11-24 ~11:45 UTC, written after run 3 (v1 n=6) and BEFORE run 4 was analysed
+
+Run 3 alone was far below n >= 30, so the registered test is applied to **pooled** post-registration runs
+(run 3, run 4, and later runs), with the rule unchanged. To avoid optional stopping, the **formal, one-time
+decision** is taken at the first pooled evaluation where v1 has >= 30 trades; looks before that are interim,
+reported for transparency, and cannot pass v1. Criteria are unchanged (vs v0 and all_eligible, +3 pp, 90% CI
+lower bound > 0 with costs +50%). Run 1 half 2 is excluded (no resolvable rule entries).

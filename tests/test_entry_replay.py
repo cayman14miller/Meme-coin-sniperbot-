@@ -82,3 +82,20 @@ def test_v1_filters_reject_young_pairs_chasing_and_wash():
     assert not ok(gecko={"buys_m5": 300, "sells_m5": 100, "traders_m5": 20})  # H2: 20 tx per trader
     assert not ok(gecko=None)                                                # missing data -> fail
     assert not ok(safety={"ok": 0, "score": 1})
+
+
+def test_pooled_oos_saves_and_pools(tmp_path, capsys):
+    from research import pooled_oos
+    calls = []
+
+    def fake_replay(db, rules, size):
+        calls.append(db)
+        t = dict(t=1.0, gross=0.1, net=0.08, cost=0.02, strategy="x", exit="trail")
+        return {rn: [t] for rn in rules}, {rn: 1 for rn in rules}, {rn: 0 for rn in rules}, 1, (0.0, 3600.0)
+    dbs = [str(tmp_path / "a.db"), str(tmp_path / "b.db")]
+    for db in dbs:
+        pooled_oos.run_trades(db, ["v0", "v1"], replay_fn=fake_replay)
+        pooled_oos.run_trades(db, ["v0", "v1"], replay_fn=fake_replay)  # second call reads the saved file
+    assert calls == dbs
+    pooled = pooled_oos.main(dbs, ["v0", "v1"])
+    assert len(pooled["v1"]) == 2 and "INTERIM" in capsys.readouterr().out
