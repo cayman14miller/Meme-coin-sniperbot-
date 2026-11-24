@@ -42,7 +42,7 @@ def load(db: str):
     tokens = {r["mint"]: dict(r) for r in con.execute("SELECT * FROM tokens")}
     dex = defaultdict(list)
     for r in con.execute("SELECT ts, mint, price_usd, liq_usd, fdv, vol_m5, vol_h1, chg_m5, chg_h1, chg_h6, "
-                         "buys_m5, sells_m5, buys_h1, sells_h1, boost_active, has_socials, pair_address "
+                         "buys_m5, sells_m5, buys_h1, sells_h1, boost_active, has_socials, pair_address, dex "
                          "FROM dex_snaps ORDER BY ts"):
         dex[r["mint"]].append(dict(r))
     gecko = defaultdict(list)
