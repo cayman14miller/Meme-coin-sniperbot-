@@ -200,3 +200,43 @@ def test_decisions_and_ticks_are_logged(tmp_path):
     pid = eng.store.open_positions()[0]["id"]
     assert eng.store.ticks(pid)[0]["source"] == "dexscreener"
     assert market.client.urls == ["https://hc.example/ping"]
+
+
+def test_liquidity_pull_with_stale_price_triggers_exit_and_alert(tmp_path):
+    eng, market = engine(tmp_path)
+    p = make_pair()  # liquidity 80k
+    market.pairs[p.mint] = p
+    run(eng.scan_once())
+    pos = eng.store.open_positions()[0]
+    assert pos["entry_liq"] == 80_000
+    # pool drained: DexScreener still shows the SAME price (stale) - a price-only stop would never fire
+    market.pairs[p.mint] = make_pair(price=pos["entry_price"], liquidity_usd=10)  # like real drains: $0.69-$11
+    run(eng.monitor_once())
+    assert any(level == "risk" and "LIQUIDITY PULLED" in title for level, title in eng.notifier.sent)
+    closed = eng.store.closed_positions()[0]
+    assert "liquidity exit" in closed["exit_reason"]
+    assert closed["realized_usd"] < 0.2 * closed["cost_usd"]  # paid out of a $5 SOL side, not at the stale price
+
+
+def test_normal_price_drop_does_not_look_like_a_liquidity_pull():
+    from sniperbot.risk import liquidity_collapsed
+    assert liquidity_collapsed(80_000, 60_000) is None      # -25% liquidity: ordinary selling
+    assert liquidity_collapsed(80_000, 20_000) is not None  # -75%: pulled
+    assert liquidity_collapsed(80_000, 1_500) is not None   # drained
+    assert liquidity_collapsed(None, 50_000) is None
+
+
+def test_old_database_is_migrated(tmp_path):
+    import sqlite3
+    db = tmp_path / "old.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE positions (id INTEGER PRIMARY KEY AUTOINCREMENT, mint TEXT NOT NULL, symbol TEXT, "
+                "name TEXT, pair_address TEXT, strategy TEXT, score REAL, reasons TEXT, entry_price REAL NOT NULL, "
+                "qty REAL NOT NULL, initial_qty REAL NOT NULL, cost_sol REAL NOT NULL, cost_usd REAL NOT NULL, "
+                "peak_price REAL NOT NULL, last_price REAL, tp1_done INTEGER DEFAULT 0, realized_sol REAL DEFAULT 0, "
+                "realized_usd REAL DEFAULT 0, opened_at REAL NOT NULL, closed_at REAL, status TEXT NOT NULL DEFAULT 'open', "
+                "exit_reason TEXT, mode TEXT)")
+    con.commit()
+    con.close()
+    st = Store(str(db))
+    assert "entry_liq" in {r[1] for r in st.conn.execute("PRAGMA table_info(positions)")}

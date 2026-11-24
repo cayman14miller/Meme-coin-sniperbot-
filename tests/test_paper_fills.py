@@ -84,3 +84,10 @@ def test_failed_transaction_costs_fee(tmp_path):
     with pytest.raises(BrokerError, match="simulated transaction failure"):
         run(b.buy(MINT, 1.0, 0.00015, SOL_USD, 300, 100_000))
     assert abs(run(b.balance_sol()) - (10 - 105_000 / 1e9)) < 1e-12
+
+
+def test_sell_into_drained_pool_pays_almost_nothing(tmp_path):
+    b = broker(tmp_path, model="model")
+    b.liquidity[MINT], b.dex[MINT] = 10, "pumpswap"   # drained pool, stale displayed price
+    s = run(b.sell(MINT, 25_000, 0.001, SOL_USD, 1000, 0))  # "worth" $25 at the stale price
+    assert s.sol * SOL_USD < 5

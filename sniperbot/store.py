@@ -94,6 +94,9 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(positions)")}
+        if "entry_liq" not in cols:  # migration: pool liquidity at entry (detects liquidity pulls)
+            self.conn.execute("ALTER TABLE positions ADD COLUMN entry_liq REAL")
         self.lock = threading.Lock()
 
     # -- helpers ---------------------------------------------------------

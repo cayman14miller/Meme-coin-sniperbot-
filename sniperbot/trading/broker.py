@@ -169,8 +169,17 @@ class PaperBroker(Broker):
                 sol = int(val) / LAMPORTS
                 self.last_fill_source = "quote"
         if sol is None:
-            cost = self._model_cost(mint, qty * price_usd)
-            sol = qty * price_usd * (1 - cost) / sol_usd
+            value = qty * price_usd
+            liq = self.liquidity.get(mint)
+            if liq is not None:
+                # constant-product payout from the SOL side (~half the USD liquidity): ~fee+impact in a normal
+                # pool, near zero in a drained one whatever the stale displayed price says
+                y = max(liq, 0.0) / 2
+                fee = POOL_FEE.get(self.dex.get(mint, ""), DEFAULT_POOL_FEE)
+                out_usd = value * (1 - fee) * y / (y + value) if y > 0 else 0.0
+            else:
+                out_usd = value * (1 - self._model_cost(mint, value))
+            sol = out_usd / sol_usd
             self.last_fill_source = "model"
         sol = max(sol - self._network_fee(priority_fee), 0.0)
         bal = await self.balance_sol()

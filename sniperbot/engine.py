@@ -11,7 +11,7 @@ from .analysis.signals import Analysis, analyze, exit_signal
 from .config import Secrets, Settings
 from .data.market import MarketData, PairInfo
 from .notify import Notifier
-from .risk import RiskManager, evaluate_exit, start_of_day_utc
+from .risk import RiskManager, evaluate_exit, liquidity_collapsed, start_of_day_utc
 from .store import Store
 from .trading.broker import Broker, JupiterBroker, PaperBroker
 
@@ -284,7 +284,8 @@ class Engine:
                 mint=p.mint, symbol=p.symbol, name=p.name, pair_address=p.pair_address,
                 strategy=("manual:" if manual else "") + a.strategy, score=a.score,
                 reasons=json.dumps(a.reasons), entry_price=p.price_usd, qty=0.0, initial_qty=0.0,
-                cost_sol=size_sol, cost_usd=size_usd, mode=self.broker.mode, status="pending")
+                cost_sol=size_sol, cost_usd=size_usd, mode=self.broker.mode, status="pending",
+                entry_liq=p.liquidity_usd)
             try:
                 fill = await self.broker.buy(p.mint, size_sol, p.price_usd, self.sol_usd, s.slippage_bps,
                                              s.priority_fee_lamports)
@@ -441,6 +442,15 @@ class Engine:
                     continue
                 if isinstance(self.broker, PaperBroker):
                     self.broker.liquidity[pos["mint"]] = pair.liquidity_usd
+                collapse = liquidity_collapsed(pos.get("entry_liq"), pair.liquidity_usd)
+                if collapse:
+                    if now - self._last_stale_alert.get(-10_000 - pos["id"], 0) >= 300:
+                        self._last_stale_alert[-10_000 - pos["id"]] = now
+                        self.notifier.send("risk", f"LIQUIDITY PULLED on {pos['symbol']}",
+                                           f"{collapse}. The displayed price is likely stale; attempting to exit. "
+                                           "Proceeds may be near zero.")
+                    await self.sell(pos, 1.0, f"liquidity exit: {collapse}", price)
+                    continue
                 peak = max(pos["peak_price"], price)
                 self.store.update_position(pos["id"], last_price=price, peak_price=peak)
                 pos.update(last_price=price, peak_price=peak)

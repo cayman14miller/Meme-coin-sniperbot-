@@ -49,6 +49,23 @@ def evaluate_exit(pos: dict, price: float, s: Settings, now: float | None = None
     return ExitDecision(0)
 
 
+MIN_POOL_LIQ_USD = 2000.0       # below this a pool is effectively drained
+LIQ_COLLAPSE_FRACTION = 0.30    # liquidity below 30% of entry = pulled (a -10% stop fires long before
+                                # price moves alone could shrink a constant-product pool this much)
+
+
+def liquidity_collapsed(entry_liq: float | None, liq: float | None) -> str | None:
+    """Reason string if the pool looks drained. DexScreener keeps the last traded price after a pull, so a
+    price-only stop loss would never fire on a rug."""
+    if liq is None:
+        return None
+    if liq < MIN_POOL_LIQ_USD:
+        return f"liquidity collapsed to ${liq:,.0f}"
+    if entry_liq and liq < entry_liq * LIQ_COLLAPSE_FRACTION:
+        return f"liquidity fell {(1 - liq / entry_liq):.0%} since entry (${entry_liq:,.0f} -> ${liq:,.0f})"
+    return None
+
+
 def start_of_day_utc(now: float | None = None) -> float:
     d = datetime.fromtimestamp(now or time.time(), tz=timezone.utc)
     return d.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
