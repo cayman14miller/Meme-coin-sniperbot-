@@ -44,7 +44,9 @@ class Engine:
                 raise SystemExit("Live trading blocked by safety interlocks:\n  - " + "\n  - ".join(problems))
             self.broker = JupiterBroker(secrets.solana_private_key, secrets.solana_rpc_url, secrets.jupiter_api_key)
         else:
-            self.broker = PaperBroker(store, self.settings.paper_starting_sol)
+            self.broker = PaperBroker(store, self.settings.paper_starting_sol, market=self.market,
+                                      fill_model=self.settings.paper_fill_model,
+                                      fail_rate=self.settings.paper_fail_rate)
         self.radar: dict[str, dict[str, Any]] = {}
         self.last_scan: dict[str, Any] = {"ts": 0, "discovered": 0, "passed_filters": 0, "researched": 0}
         self.sol_usd = 0.0
@@ -274,6 +276,9 @@ class Engine:
                 return None
             if isinstance(self.broker, PaperBroker):
                 self.broker.liquidity[p.mint] = p.liquidity_usd
+                self.broker.dex[p.mint] = p.dex
+                self.broker.fill_model = s.paper_fill_model
+                self.broker.fail_rate = s.paper_fail_rate
             # write-ahead record: if the process dies or the broker errors mid-buy, the attempt is not lost
             pid = self.store.open_position(
                 mint=p.mint, symbol=p.symbol, name=p.name, pair_address=p.pair_address,

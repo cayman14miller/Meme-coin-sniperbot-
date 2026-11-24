@@ -27,6 +27,7 @@ GECKO = "https://api.geckoterminal.com/api/v2"
 RUGCHECK = "https://api.rugcheck.xyz/v1"
 JUP_PRICE = "https://lite-api.jup.ag/price/v3"
 JUP_TOKENS = "https://lite-api.jup.ag/tokens/v2/search"
+JUP_QUOTE = "https://lite-api.jup.ag/swap/v1/quote"
 
 
 @dataclass
@@ -132,6 +133,7 @@ class MarketData:
         self._candle_cache: dict[str, tuple[float, list[Candle]]] = {}
         self._safety_cache: dict[str, tuple[float, SafetyReport]] = {}
         self._sol_price: tuple[float, float] = (0.0, 0.0)
+        self._decimals: dict[str, int] = {}
 
     async def close(self) -> None:
         await self.client.aclose()
@@ -248,6 +250,30 @@ class MarketData:
         rep = SafetyReport(ok, score, names, reason)
         self._safety_cache[mint] = (time.time(), SafetyReport(not danger, score, names, reason))
         return rep
+
+    async def jup_quote(self, input_mint: str, output_mint: str, amount: int, slippage_bps: int):
+        """Live Jupiter quote (read-only). Returns ('ok', outAmount) | ('no_route', msg) | ('unavailable', msg)."""
+        await self.dex_limit.wait()
+        try:
+            r = await self.client.get(JUP_QUOTE, params={"inputMint": input_mint, "outputMint": output_mint,
+                                                         "amount": str(amount), "slippageBps": slippage_bps,
+                                                         "restrictIntermediateTokens": "true"})
+        except httpx.HTTPError as exc:
+            return "unavailable", str(exc)
+        if r.status_code == 200:
+            out = (r.json() or {}).get("outAmount")
+            return ("ok", int(out)) if out else ("no_route", "empty quote")
+        if r.status_code in (400, 404):  # e.g. NO_ROUTES_FOUND / TOKEN_NOT_TRADABLE
+            return "no_route", r.text[:160]
+        return "unavailable", f"HTTP {r.status_code}"
+
+    async def token_decimals(self, mint: str) -> int | None:
+        if mint not in self._decimals:
+            data = await self._get(JUP_TOKENS, self.dex_limit, {"query": mint})
+            for d in data or []:
+                if isinstance(d, dict) and d.get("id") == mint and d.get("decimals") is not None:
+                    self._decimals[mint] = int(d["decimals"])
+        return self._decimals.get(mint)
 
     async def jup_prices(self, mints: list[str]) -> dict[str, float]:
         """Fallback USD prices from Jupiter (any mint), used when DexScreener has no price for a holding."""

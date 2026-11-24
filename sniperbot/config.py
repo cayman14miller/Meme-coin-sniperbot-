@@ -100,6 +100,8 @@ class Settings:
     max_capital_usd: float = 250.0    # total USD the bot may have deployed at once
     max_open_positions: int = 5
     paper_starting_sol: float = 10.0  # paper wallet starting balance
+    paper_fill_model: str = "quote"   # "quote" = live Jupiter quotes, "model" = calibrated cost model
+    paper_fail_rate: float = 0.0      # stress test: fraction of paper transactions that fail (fee still paid)
 
     # --- Exits -----------------------------------------------------------
     stop_loss_pct: float = 10.0        # hard stop loss (% below entry)
@@ -186,5 +188,9 @@ class Settings:
             raise ValueError("max_capital_usd must be > 0")
         if self.scan_interval_sec < 5 or self.monitor_interval_sec < 1:
             raise ValueError("intervals too small")
+        if self.paper_fill_model not in ("quote", "model"):
+            raise ValueError("paper_fill_model must be quote or model")
+        if not 0 <= self.paper_fail_rate < 1:
+            raise ValueError("paper_fail_rate must be in [0, 1)")
         if not 0 <= self.min_entry_score <= 100:
             raise ValueError("min_entry_score must be 0-100")

@@ -55,18 +55,39 @@ class Broker:
         pass
 
 
+# Per-swap pool fee by DEX, from live Jupiter round-trip quotes (research/cost_probe.py, Nov 2026):
+# Pump.fun AMM pools of small-cap coins cost ~0.9-1% per side; Meteora/Raydium pools far less.
+POOL_FEE = {"pumpswap": 0.0095, "pumpfun": 0.0125, "meteora": 0.003, "raydium": 0.0025, "orca": 0.003}
+DEFAULT_POOL_FEE = 0.0095   # unknown DEX: assume the expensive case
+BASE_NETWORK_LAMPORTS = 5000
+
+
 class PaperBroker(Broker):
-    """Simulates DEX fills. Slippage scales with order size relative to liquidity."""
+    """Simulated fills that cost what real swaps cost.
+
+    fill_model "quote": price each paper trade with a live Jupiter quote (actual route, pool fees, price
+    impact; no route = failed trade, as live). If the quote service is unreachable, falls back to "model".
+    fill_model "model": pool fee by DEX + constant-product price impact against the SOL side of the pool
+    (calibrated on live quotes). Network fees are always charged. `fail_rate` randomly fails transactions
+    (fee still paid) for stress tests; default 0 because no measured live rate exists yet.
+    """
 
     mode = "paper"
-    FEE = 0.0025          # ~DEX LP fee
-    BASE_SLIPPAGE = 0.005
 
-    def __init__(self, store: Store, starting_sol: float) -> None:
+    def __init__(self, store: Store, starting_sol: float, market=None, fill_model: str = "model",
+                 fail_rate: float = 0.0, rng=None) -> None:
+        import random
+
         self.store = store
         if self.store.get("paper_sol") is None:
             self.store.set("paper_sol", starting_sol)
+        self.market = market
+        self.fill_model = fill_model
+        self.fail_rate = fail_rate
+        self.rng = rng or random.Random()
         self.liquidity: dict[str, float] = {}
+        self.dex: dict[str, str] = {}
+        self.last_fill_source = ""
 
     def reset(self, starting_sol: float) -> None:
         self.store.set("paper_sol", starting_sol)
@@ -74,37 +95,88 @@ class PaperBroker(Broker):
     async def balance_sol(self) -> float:
         return float(self.store.get("paper_sol", 0.0))
 
-    def _slip(self, mint: str, usd: float) -> float:
+    def _network_fee(self, priority_fee: int) -> float:
+        return (BASE_NETWORK_LAMPORTS + priority_fee) / LAMPORTS
+
+    def _model_cost(self, mint: str, usd: float) -> float:
+        """Fraction lost on one swap: pool fee + price impact vs the SOL side (~half the quoted liquidity)."""
+        fee = POOL_FEE.get(self.dex.get(mint, ""), DEFAULT_POOL_FEE)
         liq = self.liquidity.get(mint, 0)
-        impact = (usd / liq) if liq else 0.01
-        return self.BASE_SLIPPAGE + impact
+        impact = usd / (liq / 2) if liq > 0 else 0.02
+        return min(fee + impact, 0.9)
+
+    def _maybe_fail(self, priority_fee: int) -> None:
+        if self.fail_rate and self.rng.random() < self.fail_rate:
+            bal = float(self.store.get("paper_sol", 0.0))
+            self.store.set("paper_sol", bal - self._network_fee(priority_fee))
+            raise BrokerError("simulated transaction failure (fee paid)")
+
+    async def _quote(self, inp: str, out: str, amount: int, slippage_bps: int):
+        """('ok', outAmount) | ('no_route', msg) | ('unavailable', msg)."""
+        if self.fill_model != "quote" or self.market is None:
+            return "unavailable", "quote mode off"
+        try:
+            return await self.market.jup_quote(inp, out, amount, slippage_bps)
+        except Exception as exc:
+            return "unavailable", str(exc)
+
+    async def _decimals(self, mint: str) -> int | None:
+        try:
+            return await self.market.token_decimals(mint) if self.market is not None else None
+        except Exception:
+            return None
 
     async def buy(self, mint, sol_amount, price_usd, sol_usd, slippage_bps, priority_fee) -> Fill:
         bal = await self.balance_sol()
-        fee_sol = priority_fee / LAMPORTS
-        if sol_amount + fee_sol > bal:
+        net_fee = self._network_fee(priority_fee)
+        if sol_amount + net_fee > bal:
             raise BrokerError(f"insufficient paper balance: {bal:.4f} SOL")
         if price_usd <= 0 or sol_usd <= 0:
             raise BrokerError("no price")
-        slip = self._slip(mint, sol_amount * sol_usd)
-        if slip * 10_000 > slippage_bps:
-            raise BrokerError(f"slippage {slip:.1%} exceeds max {slippage_bps / 100:.1f}%")
-        fill_price = price_usd * (1 + slip)
-        qty = sol_amount * sol_usd * (1 - self.FEE) / fill_price
-        self.store.set("paper_sol", bal - sol_amount - fee_sol)
-        return Fill(qty=qty, sol=sol_amount, price_usd=fill_price, tx=f"paper-{int(time.time() * 1000)}")
+        self._maybe_fail(priority_fee)
+        qty = None
+        status, val = await self._quote(SOL_MINT, mint, int(sol_amount * LAMPORTS), slippage_bps)
+        if status == "no_route":
+            raise BrokerError(f"no route to buy (paper quote): {val}")
+        if status == "ok":
+            dec = await self._decimals(mint)
+            if dec is not None:
+                qty = int(val) / 10 ** dec
+                self.last_fill_source = "quote"
+        if qty is None:
+            cost = self._model_cost(mint, sol_amount * sol_usd)
+            if cost * 10_000 > slippage_bps + POOL_FEE.get(self.dex.get(mint, ""), DEFAULT_POOL_FEE) * 10_000:
+                raise BrokerError(f"price impact {cost:.1%} exceeds max slippage {slippage_bps / 100:.1f}%")
+            qty = sol_amount * sol_usd * (1 - cost) / price_usd
+            self.last_fill_source = "model"
+        if qty <= 0:
+            raise BrokerError("quote returned no tokens")
+        self.store.set("paper_sol", bal - sol_amount - net_fee)
+        return Fill(qty=qty, sol=sol_amount, price_usd=sol_amount * sol_usd / qty,
+                    tx=f"paper-{self.last_fill_source}-{int(time.time() * 1000)}")
 
     async def sell(self, mint, qty, price_usd, sol_usd, slippage_bps, priority_fee, sell_all=False) -> Fill:
         if price_usd <= 0 or sol_usd <= 0:
             raise BrokerError("no price")
-        usd_value = qty * price_usd
-        slip = min(self._slip(mint, usd_value), 0.5)
-        fill_price = price_usd * (1 - slip)
-        sol = qty * fill_price * (1 - self.FEE) / sol_usd
-        sol -= priority_fee / LAMPORTS
+        self._maybe_fail(priority_fee)
+        sol = None
+        dec = await self._decimals(mint) if self.fill_model == "quote" else None
+        if dec is not None:
+            status, val = await self._quote(mint, SOL_MINT, int(qty * 10 ** dec), slippage_bps)
+            if status == "no_route":
+                raise BrokerError(f"no route to sell (paper quote): {val}")
+            if status == "ok":
+                sol = int(val) / LAMPORTS
+                self.last_fill_source = "quote"
+        if sol is None:
+            cost = self._model_cost(mint, qty * price_usd)
+            sol = qty * price_usd * (1 - cost) / sol_usd
+            self.last_fill_source = "model"
+        sol = max(sol - self._network_fee(priority_fee), 0.0)
         bal = await self.balance_sol()
-        self.store.set("paper_sol", bal + max(sol, 0))
-        return Fill(qty=qty, sol=max(sol, 0), price_usd=fill_price, tx=f"paper-{int(time.time() * 1000)}")
+        self.store.set("paper_sol", bal + sol)
+        return Fill(qty=qty, sol=sol, price_usd=(sol * sol_usd / qty) if qty else 0.0,
+                    tx=f"paper-{self.last_fill_source}-{int(time.time() * 1000)}")
 
 
 class JupiterBroker(Broker):
