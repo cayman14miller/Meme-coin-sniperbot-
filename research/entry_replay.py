@@ -85,7 +85,40 @@ def rule_v1_scoring(ctx) -> tuple[bool, float, str, list[str]]:
     return a.score >= 65, a.score, a.strategy, a.reasons
 
 
-RULES = {"v0": rule_v0, "all_eligible": rule_all_eligible, "v1_scoring": rule_v1_scoring}
+def v1_filters_pass(ctx) -> tuple[bool, str]:
+    """Pre-registered v1 filters (research/HYPOTHESES.md, 'v1 rule'): only hypotheses supported on half 1.
+    Missing data counts as a fail (conservative)."""
+    s, tok, g, sf = ctx["snap"], ctx["tok"], ctx["gecko"], ctx["safety"]
+    if sf is None or not sf["ok"] or (sf["score"] or 0) > 5000:
+        return False, "safety"
+    created = tok.get("pair_created_at")
+    if not created or s["ts"] - created < 30 * 60:
+        return False, "H9: pair younger than 30 min"
+    if (s["chg_h1"] or 0) > 100:
+        return False, "H1: up more than 100% in 1h"
+    if not g or not g["traders_m5"]:
+        return False, "H2: no unique-trader data"
+    if ((g["buys_m5"] or 0) + (g["sells_m5"] or 0)) / g["traders_m5"] > 4:
+        return False, "H2: more than 4 transactions per unique trader"
+    return True, ""
+
+
+def rule_v1_filters_only(ctx) -> tuple[bool, float, str, list[str]]:
+    ok, why = v1_filters_pass(ctx)
+    return ok, 0.0, "v1_filters", [why] if why else []
+
+
+def rule_v1(ctx) -> tuple[bool, float, str, list[str]]:
+    """v1 rule = v1 filters + unchanged v0 scoring (H8 was not evaluable, so scoring stays v0)."""
+    ok, why = v1_filters_pass(ctx)
+    if not ok:
+        return False, 0.0, "rejected", [why]
+    a = analyze(ctx["pair"], ctx["candles"], ["early", "momentum", "dip", "breakout"])
+    return a.score >= 65, a.score, a.strategy, a.reasons
+
+
+RULES = {"v0": rule_v0, "all_eligible": rule_all_eligible, "v1_scoring": rule_v1_scoring,
+         "v1_filters_only": rule_v1_filters_only, "v1": rule_v1}
 
 
 # --------------------------------------------------------------------------- exits & costs

@@ -68,3 +68,17 @@ def test_recent_entries_are_not_judged_and_open_trades_marked_at_end(tmp_path):
 def test_liquidity_collapse_exits_at_realizable_value():
     res = er.exit_v0(1.0, T0, [(T0 + 30, 1.0, 50_000), (T0 + 60, 50.0, 10)], dead=False)
     assert res[1] == "liquidity collapsed" and res[0] < -0.5  # $10 pool can't pay out a $25 position
+
+
+def test_v1_filters_reject_young_pairs_chasing_and_wash():
+    base = {"ts": T0, "chg_h1": 50}
+    tok = {"pair_created_at": T0 - 3600}
+    sf = {"ok": 1, "score": 1}
+    good_g = {"buys_m5": 60, "sells_m5": 40, "traders_m5": 50}
+    ok = lambda **kw: er.v1_filters_pass({**dict(snap=base, tok=tok, gecko=good_g, safety=sf), **kw})[0]
+    assert ok()
+    assert not ok(tok={"pair_created_at": T0 - 600})                         # H9: 10 minutes old
+    assert not ok(snap={"ts": T0, "chg_h1": 250})                            # H1: chasing
+    assert not ok(gecko={"buys_m5": 300, "sells_m5": 100, "traders_m5": 20})  # H2: 20 tx per trader
+    assert not ok(gecko=None)                                                # missing data -> fail
+    assert not ok(safety={"ok": 0, "score": 1})

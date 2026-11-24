@@ -138,3 +138,14 @@ reporting the last traded price, so a price-only stop never fires and the positi
 The old paper broker would even "sell" at that stale price (understating rug losses). Quote-based paper fills fail
 correctly (no route). Fix needed: monitor pool liquidity for every open position and treat a collapse as an exit /
 alert condition.
+
+### Entry replay - first half of run 1 (entries with >= 60 min follow-up, calibrated costs, drained-pool rule)
+
+| Rule | trades | win | mean net | 90% CI | main exits |
+|---|---|---|---|---|---|
+| v0 (bot as is) | 5 | 20% | **-36.6%** | [-66.9%, -8.8%] | stop 4, trail 1 |
+| v1_scoring (H8) | 5 | 0% | -43.9% | [-70.2%, -18.3%] | stop 5 |
+| all v0-eligible | 55 | 38% | **-14.2%** | [-30.1%, +2.6%] | **liquidity collapsed 24**, TP2 16, stop 10, trail 5 |
+
+- No rule shows positive expectancy. H8 not evaluable (n=5). 44% of "buy everything eligible" trades ended in a
+  liquidity pull. v1 rule pre-registered in HYPOTHESES.md; to be tested on fresh data only.

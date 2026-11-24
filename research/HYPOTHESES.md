@@ -31,3 +31,21 @@ Purpose: decide in advance what we test and what counts as evidence, so filters 
    required before any rule is trusted.
 6. Cost assumptions: calibrated model (Pump.fun AMM ~0.95%/side + impact vs SOL side + network fees);
    results must also hold with costs +50% (sensitivity) to count.
+
+## v1 rule - registered 2026-11-24 ~06:00 UTC, BEFORE any out-of-sample data was examined
+
+Built only from hypotheses supported on half 1 of `market-run1.db` (see RESULTS.md):
+
+* keep v0 static filters and v0 RugCheck requirement (ok, score <= 5000)
+* **H9** pair age >= 30 minutes
+* **H1** 1-hour price change <= +100% at decision time
+* **H2** <= 4 transactions per unique trader in the last 5 minutes (GeckoTerminal); missing data = reject
+* scoring unchanged from v0 (H8 was not evaluable: only 5 trades per rule)
+
+Implemented as `entry_replay` rules `v1` (filters + v0 scoring) and `v1_filters_only` (filters, no scoring).
+
+**Test plan (fixed now):** evaluate once on fresh recorder data collected after this registration (new runs),
+against `v0` and `all_eligible` on the same data, with entries that have >= 60 min follow-up, calibrated costs,
+and the drained-pool rule. v1 is considered better only if it has >= 30 trades and its mean net return exceeds
+v0's and all_eligible's by >= 3 percentage points; it is considered *profitable* only if the lower bound of the
+90% bootstrap CI of its mean is above 0 - with costs +50% as well. Otherwise it is not deployed.
