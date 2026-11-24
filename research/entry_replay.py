@@ -111,7 +111,7 @@ def exit_v0(p0: float, t0: float, after: list[tuple[float, float]], dead: bool):
 
 # --------------------------------------------------------------------------- replay
 def replay(db: str, rule_names: list[str], size_usd: float = 25.0, fetch=fetch_candles):
-    tokens, dex, gecko, safety, sources, span = load(db)
+    tokens, dex, gecko, safety, sources, span, jup = load(db)
     trades = {r: [] for r in rule_names}
     fired = {r: 0 for r in rule_names}
     unresolved = {r: 0 for r in rule_names}

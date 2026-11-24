@@ -49,6 +49,13 @@ def load(db: str):
     for r in con.execute("SELECT ts, mint, buys_m5, sells_m5, buyers_m5, sellers_m5, traders_m5, "
                          "traders_h1, buys_h1, sells_h1, vol_m5, locked_liq_pct FROM gecko_snaps ORDER BY ts"):
         gecko[r["mint"]].append(dict(r))
+    jup = defaultdict(list)
+    has_jup = con.execute("SELECT 1 FROM sqlite_master WHERE name='jup_snaps'").fetchone()
+    if has_jup:
+        for r in con.execute("SELECT ts, mint, organic_score, organic_label, dev_mints, top_holders_pct, holders, "
+                             "m5_holder_chg, m5_net_buyers, m5_org_buyers, m5_liq_chg, m5_buy_vol, m5_buy_org_vol "
+                             "FROM jup_snaps ORDER BY ts"):
+            jup[r["mint"]].append(dict(r))
     safety = defaultdict(list)
     for r in con.execute("SELECT ts, mint, ok, score, lp_locked_pct, danger FROM safety ORDER BY ts"):
         safety[r["mint"]].append(dict(r))
@@ -57,7 +64,7 @@ def load(db: str):
         sources[m].add(s)
     span = con.execute("SELECT MIN(ts), MAX(ts), COUNT(*) FROM cycles").fetchone()
     con.close()
-    return tokens, dex, gecko, safety, sources, span
+    return tokens, dex, gecko, safety, sources, span, jup
 
 
 def latest_before(rows, t0, max_age=None):
@@ -122,7 +129,7 @@ def replay_v0(p0, t0, after, dead_at):
     return None
 
 
-def features(tok, path, i0, gecko, safety, sources):
+def features(tok, path, i0, gecko, safety, sources, jup=None):
     s = path[i0]
     t0 = s["ts"]
     created = tok.get("pair_created_at")
@@ -141,6 +148,13 @@ def features(tok, path, i0, gecko, safety, sources):
                  traders_m5=g["traders_m5"],
                  buyer_seller_wallets=(g["buyers_m5"] or 0) / g["sellers_m5"] if g["sellers_m5"] else None,
                  locked_liq=g["locked_liq_pct"])
+    j = latest_before((jup or {}).get(tok["mint"], []), t0, max_age=300)
+    if j:
+        f.update(organic_score=j["organic_score"], organic_label=j["organic_label"], dev_mints=j["dev_mints"],
+                 top_holders=j["top_holders_pct"], holder_chg_m5=j["m5_holder_chg"], net_buyers_m5=j["m5_net_buyers"],
+                 org_buyers_m5=j["m5_org_buyers"], liq_chg_m5=j["m5_liq_chg"],
+                 organic_share=(j["m5_buy_org_vol"] / j["m5_buy_vol"])
+                 if j["m5_buy_vol"] and j["m5_buy_org_vol"] is not None else None)
     sf = latest_before(safety.get(tok["mint"], []), t0 + 120)  # first report may land seconds after t0
     if sf:
         f.update(rug_ok=bool(sf["ok"]), rug_score=sf["score"], lp_locked=sf["lp_locked_pct"],
@@ -179,8 +193,8 @@ def cut(x, edges, fmt="{}"):
     return f">= {fmt.format(edges[-1])}"
 
 
-def main(db: str) -> None:
-    tokens, dex, gecko, safety, sources, span = load(db)
+def main(db: str, half: int | None = None) -> None:
+    tokens, dex, gecko, safety, sources, span, jup = load(db)
     hours = (span[1] - span[0]) / 3600 if span[0] else 0
     print(f"UNIVERSE STUDY - {db} - {len(tokens)} tokens, {span[2]} cycles over {hours:.1f}h")
     if hours < 6:
@@ -197,10 +211,17 @@ def main(db: str) -> None:
             if i0 is None or i0 >= len(path) - 1:
                 continue
             row = {"mint": mint, "symbol": tok.get("symbol"), "t0": path[i0]["ts"]}
-            row.update(features(tok, path, i0, gecko, safety, sources))
+            row.update(features(tok, path, i0, gecko, safety, sources, jup))
             row.update(outcomes(path, i0, tok.get("dead_at")))
             pts[kind].append(row)
 
+    if half:
+        for kind in pts:
+            ts = sorted(r["t0"] for r in pts[kind])
+            if ts:
+                mid = ts[len(ts) // 2]
+                pts[kind] = [r for r in pts[kind] if (r["t0"] < mid) == (half == 1)]
+        print(f"!! Restricted to chronological HALF {half} of decision points (pre-registered protocol).")
     for kind, rows in pts.items():
         lab = [r for r in rows if "dump" in r]
         v0 = [r["v0_exit"] for r in rows if r.get("v0_exit") is not None]
@@ -230,8 +251,20 @@ def main(db: str) -> None:
         bucket_table(rows, lambda r: cut(r.get("traders_m5"), [10, 30, 100, 300], "{}"), "by 5m unique traders")
         bucket_table(rows, lambda r: None if "rug_ok" not in r else ("rugcheck ok" if r["rug_ok"] else "rugcheck danger"),
                      "by RugCheck verdict")
+        bucket_table(rows, lambda r: r.get("organic_label"), "H2 by Jupiter organic score label")
+        bucket_table(rows, lambda r: cut(r.get("organic_score"), [10, 30, 60], "{}"), "H2 by Jupiter organic score")
+        bucket_table(rows, lambda r: cut(r.get("organic_share"), [0.1, 0.25, 0.5], "{}"), "H2 by organic share of 5m buy volume")
+        bucket_table(rows, lambda r: cut(r.get("dev_mints"), [2, 10, 50, 500], "{}"), "H3 by creator's previous launches")
+        bucket_table(rows, lambda r: cut(r.get("top_holders"), [15, 30, 50], "{}%"), "H4 by top-holder share")
+        bucket_table(rows, lambda r: None if r.get("holder_chg_m5") is None else
+                     ("H5 participation" if (r["holder_chg_m5"] > 0 and (r.get("net_buyers_m5") or 0) > 0
+                                             and (r.get("org_buyers_m5") or 0) >= 10) else "not"),
+                     "H5 holders rising + net & organic buyers")
+        bucket_table(rows, lambda r: cut(r.get("liq_chg_m5"), [-10, 0, 10], "{}%"), "H6 by 5m liquidity change")
     print("\nRead-only. Small buckets are flagged '(small)'; differences there are noise until n grows.")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "market-data.db")
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    half = next((int(a.split("=")[1]) for a in sys.argv[1:] if a.startswith("--half=")), None)
+    main(args[0] if args else "market-data.db", half)

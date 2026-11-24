@@ -62,6 +62,11 @@ def test_features_ignore_data_after_t0():
     gecko["M"][0]["ts"] = T0 - 30
     f = us.features(tok, p, 0, gecko, {}, {})
     assert f["tx_per_trader_m5"] == 600
+    jup = {"M": [dict(ts=T0 - 10, organic_score=5.0, organic_label="low", dev_mints=900, top_holders_pct=40.0,
+                      holders=100, m5_holder_chg=-1.0, m5_net_buyers=-3, m5_org_buyers=1, m5_liq_chg=-20.0,
+                      m5_buy_vol=1000.0, m5_buy_org_vol=None)]}  # Jupiter sometimes returns null organic volume
+    f = us.features(tok, p, 0, gecko, {}, {}, jup)
+    assert f["dev_mints"] == 900 and f["organic_share"] is None
 
 
 def test_main_runs_on_recorder_schema(tmp_path, capsys):
