@@ -18,7 +18,7 @@ def make_db(tmp_path, prices, liq=50_000, safety_ok=1):
                     "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (T0 + i * 30, "M", "POOL", "pumpswap", p, liq, 500_000, 5000, 1, 10, 0, 60, 40, 600, 400, 0, 1))
     con.execute("INSERT INTO safety(ts, mint, ok, score) VALUES(?,?,?,?)", (T0 - 10, "M", safety_ok, 1))
-    con.execute("INSERT INTO cycles(ts) VALUES(?)", (T0,))
+    con.executemany("INSERT INTO cycles(ts) VALUES(?)", [(T0,), (T0 + (len(prices) - 1) * 30,)])
     con.commit()
     con.close()
     return str(db)
@@ -34,7 +34,8 @@ def test_forming_candle_and_no_lookahead():
 def test_all_eligible_trades_once_per_cooldown_with_costs(tmp_path):
     prices = [1.0] * 4 + [0.85] * 10  # buy then stop out
     db = make_db(tmp_path, prices)
-    trades, fired, unresolved, n, _ = er.replay(db, ["all_eligible"], fetch=lambda pool, oldest: ([], "ok"))
+    trades, fired, unresolved, n, _ = er.replay(db, ["all_eligible"], fetch=lambda pool, oldest: ([], "ok"),
+                                                min_followup_min=0)
     t = trades["all_eligible"]
     assert n == 1 and fired["all_eligible"] == 1 and len(t) == 1  # no re-entry within 2h
     assert t[0]["exit"] == "stop" and abs(t[0]["gross"] + 0.15) < 1e-9
@@ -51,3 +52,14 @@ def test_v0_rule_respects_safety(tmp_path):
 def test_trade_cost_matches_measured_scale():
     assert 0.018 < er.trade_cost("pumpswap", 50_000, 25) < 0.03
     assert er.trade_cost("meteora", 50_000, 25) < 0.012
+
+
+def test_recent_entries_are_not_judged_and_open_trades_marked_at_end(tmp_path):
+    db = make_db(tmp_path, [1.0] * 4 + [1.05] * 200)  # 100 minutes of flat-ish data after entry
+    trades, fired, unresolved, *_ = er.replay(db, ["all_eligible"], fetch=lambda pool, oldest: ([], "ok"))
+    t = trades["all_eligible"]
+    assert len(t) == 1 and t[0]["exit"] == "end of data" and abs(t[0]["gross"] - 0.05) < 1e-9
+    (tmp_path / "x").mkdir()
+    db2 = make_db(tmp_path / "x", [1.0] * 10)  # 5 minutes only
+    trades, fired, unresolved, *_ = er.replay(db2, ["all_eligible"], fetch=lambda pool, oldest: ([], "ok"))
+    assert not trades["all_eligible"] and unresolved["all_eligible"] == 1

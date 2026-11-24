@@ -69,3 +69,23 @@ Known remaining gaps: no on-chain stop orders exist for these DEX pools, so prot
 process to be running; a wallet-wide scan for tokens held without any position record is not implemented
 (only buys the bot attempted are reconciled); live execution path (JupiterBroker) has never been exercised
 against mainnet and must be tested with tiny amounts only after explicit approval.
+
+## Execution cost measurement (cycle 2) - live Jupiter quotes, 30 coins, Nov 24 2026
+
+Round trip (buy then immediately sell, quotes only) by trade size and pool liquidity:
+
+| Liquidity | $25 median | $100 median |
+|---|---|---|
+| < $15k | 3.45% | 6.58% |
+| $15-50k | 1.82% | 2.38% |
+| $50-150k | 1.87% | 2.13% |
+
+- Pump.fun AMM pools (most of the universe) cost ~0.9-1% **per side** even with negligible impact;
+  Meteora / Raydium CLMM pools ~0-0.5%. One coin (NVIDIA, $40k liquidity) had **no route** at all.
+- The v0 paper broker charged 0.25% per side and computed impact against total (not SOL-side) liquidity:
+  it understated Pump.fun fees ~4x and impact ~2x. Paper fills now use live quotes (fallback: a model
+  calibrated on these measurements). **v0's paper results were therefore optimistic on costs.**
+- Not yet measured: failed-transaction rate, latency slippage, MEV/sandwich losses (a 3% slippage
+  tolerance invites sandwiching up to that amount). These need tiny live tests, only with approval.
+- Implication: at ~2% round trip plus a 10% stop, a strategy needs a substantial edge per trade; trade
+  size should stay small relative to liquidity.

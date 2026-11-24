@@ -95,8 +95,8 @@ def trade_cost(dex: str, liq: float, size_usd: float) -> float:
     return 2 * (fee + impact) + NETWORK_FEE_FRAC
 
 
-def exit_v0(p0: float, t0: float, after: list[tuple[float, float]], dead: bool):
-    """Returns (gross return, reason) or None if unresolved at end of data."""
+def exit_v0(p0: float, t0: float, after: list[tuple[float, float]], dead: bool, close_at_end: bool = False):
+    """Returns (gross return, reason); None if unresolved at end of data (unless close_at_end: mark at last price)."""
     qty, realized, peak, tp1 = 1.0, 0.0, p0, False
     for ts, px in after:
         peak = max(peak, px)
@@ -116,12 +116,18 @@ def exit_v0(p0: float, t0: float, after: list[tuple[float, float]], dead: bool):
             return realized + qty * px / p0 - 1, "max hold"
     if dead and after:
         return realized + qty * after[-1][1] / p0 - 1, "dead"
+    if close_at_end:
+        return realized + qty * (after[-1][1] if after else p0) / p0 - 1, "end of data"
     return None
 
 
 # --------------------------------------------------------------------------- replay
-def replay(db: str, rule_names: list[str], size_usd: float = 25.0, fetch=fetch_candles):
+def replay(db: str, rule_names: list[str], size_usd: float = 25.0, fetch=fetch_candles, min_followup_min: float = 60):
+    """Entries need >= min_followup_min of data after them (else skipped as 'too recent'); trades still open
+    after that are marked at the last price. Counting only early-resolving trades would bias toward fast
+    outcomes (quick TP2s and stops)."""
     tokens, dex, gecko, safety, sources, span, jup = load(db)
+    data_end = span[1] or 0
     trades = {r: [] for r in rule_names}
     fired = {r: 0 for r in rule_names}
     unresolved = {r: 0 for r in rule_names}
@@ -152,8 +158,11 @@ def replay(db: str, rule_names: list[str], size_usd: float = 25.0, fetch=fetch_c
                     continue
                 fired[rn] += 1
                 last_entry[rn] = t
+                if t > data_end - min_followup_min * 60 and not tok.get("dead_at"):
+                    unresolved[rn] += 1  # too recent to judge
+                    continue
                 after = [(r["ts"], r["price_usd"]) for r in path[i + 1:]]
-                res = exit_v0(s["price_usd"], t, after, bool(tok.get("dead_at")))
+                res = exit_v0(s["price_usd"], t, after, bool(tok.get("dead_at")), close_at_end=True)
                 if res is None:
                     unresolved[rn] += 1
                     continue
@@ -191,7 +200,8 @@ def main(db: str, rules: list[str], size: float) -> None:
     print(f"ENTRY REPLAY - {db} - {hours:.1f}h of data, {n_tok} tokens ever passed v0 filters, ${size:g}/trade")
     for rn in rules:
         ts = sorted(trades[rn], key=lambda x: x["t"])
-        print(f"\n=== rule {rn}: fired {fired[rn]} times, {len(ts)} resolved, {unresolved[rn]} still open at data end ===")
+        print(f"\n=== rule {rn}: fired {fired[rn]} times, {len(ts)} with >=60m follow-up, "
+              f"{unresolved[rn]} too recent to judge ===")
         summarize("all", ts)
         if len(ts) >= 4:
             mid = ts[len(ts) // 2]["t"]
