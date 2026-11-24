@@ -219,3 +219,34 @@ What the run does show (descriptive, n is large only for all_eligible):
   bound only +1.7%. Consistent with the frozen v0 baseline (-12.6%, n=10).
 - v1 is ~5.6 pp ahead of v0 but its own expectancy is ~-1%, CI [-10%, +9%]: no evidence of an edge.
 - Run 6: 20/92 cycles had 1 failed request.
+
+## FORMAL out-of-sample decision on v1 (runs 3-7, 9.4 h fresh data, first pooled look with v1 n >= 30)
+
+| Rule | trades | win | mean net | median | 90% CI | mean net, costs +50% | 90% CI (+50%) |
+|---|---|---|---|---|---|---|---|
+| v0 (bot as is) | 50 | 32% | -4.7% | -13.1% | [-11.6%, +2.6%] | -5.8% | [-12.8%, +1.4%] |
+| **v1** | **32** | 25% | **-1.3%** | -13.1% | [-8.7%, +6.7%] | -2.4% | [-9.8%, +5.6%] |
+| v1_filters_only | 42 | 31% | +1.5% | -12.4% | [-5.4%, +8.6%] | +0.4% | [-6.5%, +7.5%] |
+| all v0-eligible | 349 | 29% | -24.7% | -16.6% | [-29.9%, -19.2%] | -25.5% | [-30.8%, -20.1%] |
+
+Pre-registered criteria:
+| Criterion | Result |
+|---|---|
+| >= 30 trades | **pass** (32) |
+| mean beats v0 by >= 3 pp | **pass, barely** (+3.4 pp; +3.4 pp with costs +50%) |
+| mean beats all_eligible by >= 3 pp | **pass** (+23 pp) |
+| profitable: 90% CI lower bound > 0, incl. costs +50% | **FAIL** (-8.7% / -9.8%) |
+
+**Verdict: v1 is NOT profitable and is NOT deployed live.** It meets the "better than v0" point-estimate bar, but:
+- bootstrap of the difference v1 - v0: +3.4 pp, 90% CI [-6.9, +13.6] pp, P(no improvement) ~ 0.30 - the
+  improvement is not statistically established;
+- 23 of v1's 32 trades are trades v0 also took; the 27 v0 trades v1 rejected averaged -7.3% (directionally right);
+- v1's mean is carried by 3 winners (+54%, +55%, +72%); without the single best trade it is -3.7%;
+- 20 of 32 v1 exits are the 10% stop: the typical entry falls right after the buy.
+
+v1_filters_only (+1.5%, n=42) is reported for completeness; it was a registered comparison variant, not the
+decision rule, and its CI also spans zero. Promoting it now would be choosing the winner after seeing the data.
+
+**What this establishes (high confidence, n=349):** buying what passes v0's static filters loses ~25%/trade;
+the scoring + RugCheck layer removes most of that loss. **What it does not establish:** any positive edge.
+Every scored rule is consistent with zero to slightly negative expectancy after realistic costs.

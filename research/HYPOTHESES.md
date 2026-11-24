@@ -57,3 +57,7 @@ Run 3 alone was far below n >= 30, so the registered test is applied to **pooled
 decision** is taken at the first pooled evaluation where v1 has >= 30 trades; looks before that are interim,
 reported for transparency, and cannot pass v1. Criteria are unchanged (vs v0 and all_eligible, +3 pp, 90% CI
 lower bound > 0 with costs +50%). Run 1 half 2 is excluded (no resolvable rule entries).
+
+### Outcome (2026-11-24 ~21:15 UTC): v1 formally evaluated on runs 3-7 - better than v0 on the point estimate
+(+3.4 pp, not statistically established), NOT profitable (CI lower bound -8.7%). Not deployed. Per protocol, v1 is
+not re-tuned on this data; any new rule must be registered before it sees fresh data (run 8 onward).
