@@ -85,3 +85,18 @@ def test_main_runs_on_recorder_schema(tmp_path, capsys):
     us.main(str(db))
     out = capsys.readouterr().out
     assert "dumped >=50% within 60m: 100%" in out
+
+
+def test_drained_pool_spike_is_not_a_runner_and_rug_is_a_total_loss():
+    p = path([1.0] * 3)
+    p += [dict(snap(T0 + 180, 20000.0), liq_usd=84)]       # phantom price print in an emptied pool
+    p += [dict(snap(T0 + 240 + i * 60, 1e-6), liq_usd=0) for i in range(60)]
+    o = us.outcomes(p, 0, None)
+    assert not o["runner"] and o["dump"]
+    assert o["v0_exit"] <= -us.COST + 1e-9  # no phantom profit (was +2,000,000% before the fix)
+
+
+def test_rug_to_zero_liquidity_is_a_total_loss():
+    p = path([1.0] * 3) + [dict(snap(T0 + 240 + i * 60, 1e-6), liq_usd=0) for i in range(60)]
+    o = us.outcomes(p, 0, None)
+    assert o["dump"] and abs(o["v0_exit"] - (-1 - us.COST)) < 1e-9

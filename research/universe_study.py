@@ -85,20 +85,36 @@ def v0_pass(s: dict, created: float | None) -> bool:
             and not (s["fdv"] and s["fdv"] > V0["max_fdv"]))
 
 
+MIN_TRADEABLE_LIQ = 2000.0  # below this, DexScreener prices come from drained pools and cannot be sold into
+POSITION_USD = 25.0
+
+
+def realizable(ratio: float, liq: float | None) -> float:
+    """Value of a $POSITION_USD position as a multiple of cost, given price ratio and pool liquidity.
+    Selling into a pool can never return more than its SOL side (~half the USD liquidity), and below
+    MIN_TRADEABLE_LIQ we never credit a gain."""
+    if liq is None or liq >= MIN_TRADEABLE_LIQ:
+        return ratio
+    # conservative: a drained pool never yields a profit (prints there are usually phantom)
+    return min(ratio, max(liq, 0.0) / 2 / POSITION_USD, 1.0)
+
+
 def outcomes(path: list[dict], i0: int, dead_at: float | None) -> dict:
     p0, t0 = path[i0]["price_usd"], path[i0]["ts"]
-    after = [(r["ts"], r["price_usd"]) for r in path[i0 + 1:] if r["price_usd"]]
+    after = [(r["ts"], r["price_usd"], r.get("liq_usd")) for r in path[i0 + 1:] if r["price_usd"]]
     out: dict = {"covered_min": (after[-1][0] - t0) / 60 if after else 0.0}
-    last_px = after[-1][1] if after else p0
+    last = after[-1] if after else (t0, p0, None)
     for h in HORIZONS:
         j = bisect_left([a[0] for a in after], t0 + h * 60)
         if j < len(after):
-            out[f"ret_{h}"] = after[j][1] / p0 - 1
+            out[f"ret_{h}"] = realizable(after[j][1] / p0, after[j][2]) - 1
         elif dead_at and dead_at <= t0 + h * 60:
-            out[f"ret_{h}"] = last_px / p0 - 1  # retired as dead: stuck at last price
-    w60 = [px for ts, px in after if ts <= t0 + 3600]
+            out[f"ret_{h}"] = realizable(last[1] / p0, last[2]) - 1  # retired as dead: stuck at last value
+    w60 = [(px, lq) for ts, px, lq in after if ts <= t0 + 3600]
     if w60 and (out["covered_min"] >= 55 or dead_at):
-        out["max_60"], out["min_60"] = max(w60) / p0 - 1, min(w60) / p0 - 1
+        tradeable_hi = [px for px, lq in w60 if lq is None or lq >= MIN_TRADEABLE_LIQ]
+        out["max_60"] = (max(tradeable_hi) / p0 - 1) if tradeable_hi else -1.0  # phantom spikes in drained pools ignored
+        out["min_60"] = min(realizable(px / p0, lq) for px, lq in w60) - 1   # a drained pool counts as a dump
         out["dump"] = out["min_60"] <= -0.5
         out["runner"] = out["max_60"] >= 0.5
     out["v0_exit"] = replay_v0(p0, t0, after, dead_at)
@@ -106,9 +122,14 @@ def outcomes(path: list[dict], i0: int, dead_at: float | None) -> dict:
 
 
 def replay_v0(p0, t0, after, dead_at):
-    """v0 exit rules on the polled price path; None if the path ends before an exit and the coin isn't dead."""
+    """v0 exit rules on the polled path [(ts, price, liquidity)]; None if unresolved at end of data.
+    If liquidity collapses below MIN_TRADEABLE_LIQ the position is exited at its realizable value."""
     qty, realized, peak, tp1 = 1.0, 0.0, p0, False
-    for ts, px in after:
+    for item in after:
+        ts, px = item[0], item[1]
+        lq = item[2] if len(item) > 2 else None
+        if lq is not None and lq < MIN_TRADEABLE_LIQ:
+            return realized + qty * realizable(px / p0, lq) - 1 - COST
         peak = max(peak, px)
         ch = px / p0 - 1
         if ch <= -0.10:
@@ -125,7 +146,8 @@ def replay_v0(p0, t0, after, dead_at):
         if ts - t0 >= 240 * 60:
             return realized + qty * px / p0 - 1 - COST
     if dead_at and after:
-        return realized + qty * after[-1][1] / p0 - 1 - COST
+        last = after[-1]
+        return realized + qty * realizable(last[1] / p0, last[2] if len(last) > 2 else None) - 1 - COST
     return None
 
 

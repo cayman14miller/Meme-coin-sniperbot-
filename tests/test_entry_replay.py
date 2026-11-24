@@ -63,3 +63,8 @@ def test_recent_entries_are_not_judged_and_open_trades_marked_at_end(tmp_path):
     db2 = make_db(tmp_path / "x", [1.0] * 10)  # 5 minutes only
     trades, fired, unresolved, *_ = er.replay(db2, ["all_eligible"], fetch=lambda pool, oldest: ([], "ok"))
     assert not trades["all_eligible"] and unresolved["all_eligible"] == 1
+
+
+def test_liquidity_collapse_exits_at_realizable_value():
+    res = er.exit_v0(1.0, T0, [(T0 + 30, 1.0, 50_000), (T0 + 60, 50.0, 10)], dead=False)
+    assert res[1] == "liquidity collapsed" and res[0] < -0.5  # $10 pool can't pay out a $25 position

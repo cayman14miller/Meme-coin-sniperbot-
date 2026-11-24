@@ -29,7 +29,7 @@ from statistics import mean, median
 
 sys.path.insert(0, os.getcwd())
 from research.baseline_study import fetch_candles  # noqa: E402  (cached GeckoTerminal 1m candles)
-from research.universe_study import V0, latest_before, load, v0_pass  # noqa: E402
+from research.universe_study import MIN_TRADEABLE_LIQ, V0, latest_before, load, realizable, v0_pass  # noqa: E402
 from sniperbot.analysis.signals import analyze  # noqa: E402
 from sniperbot.data.market import Candle, PairInfo  # noqa: E402
 from sniperbot.trading.broker import DEFAULT_POOL_FEE, POOL_FEE  # noqa: E402
@@ -98,7 +98,11 @@ def trade_cost(dex: str, liq: float, size_usd: float) -> float:
 def exit_v0(p0: float, t0: float, after: list[tuple[float, float]], dead: bool, close_at_end: bool = False):
     """Returns (gross return, reason); None if unresolved at end of data (unless close_at_end: mark at last price)."""
     qty, realized, peak, tp1 = 1.0, 0.0, p0, False
-    for ts, px in after:
+    for item in after:
+        ts, px = item[0], item[1]
+        lq = item[2] if len(item) > 2 else None
+        if lq is not None and lq < MIN_TRADEABLE_LIQ:  # pool drained: only its SOL side can be recovered
+            return realized + qty * realizable(px / p0, lq) - 1, "liquidity collapsed"
         peak = max(peak, px)
         ch = px / p0 - 1
         if ch <= -0.10:
@@ -115,7 +119,8 @@ def exit_v0(p0: float, t0: float, after: list[tuple[float, float]], dead: bool, 
         if ts - t0 >= 240 * 60:
             return realized + qty * px / p0 - 1, "max hold"
     if dead and after:
-        return realized + qty * after[-1][1] / p0 - 1, "dead"
+        last = after[-1]
+        return realized + qty * realizable(last[1] / p0, last[2] if len(last) > 2 else None) - 1, "dead"
     if close_at_end:
         return realized + qty * (after[-1][1] if after else p0) / p0 - 1, "end of data"
     return None
@@ -161,7 +166,7 @@ def replay(db: str, rule_names: list[str], size_usd: float = 25.0, fetch=fetch_c
                 if t > data_end - min_followup_min * 60 and not tok.get("dead_at"):
                     unresolved[rn] += 1  # too recent to judge
                     continue
-                after = [(r["ts"], r["price_usd"]) for r in path[i + 1:]]
+                after = [(r["ts"], r["price_usd"], r["liq_usd"]) for r in path[i + 1:]]
                 res = exit_v0(s["price_usd"], t, after, bool(tok.get("dead_at")), close_at_end=True)
                 if res is None:
                     unresolved[rn] += 1
@@ -194,16 +199,20 @@ def summarize(name: str, ts: list[dict]) -> None:
           f"PF {pf:5.2f} avg cost {mean(x['cost'] for x in ts):5.2%}  90% CI [{lo:+.2%}, {hi:+.2%}]")
 
 
-def main(db: str, rules: list[str], size: float) -> None:
+def main(db: str, rules: list[str], size: float, half: int | None = None) -> None:
     trades, fired, unresolved, n_tok, span = replay(db, rules, size)
     hours = (span[1] - span[0]) / 3600 if span[0] else 0
     print(f"ENTRY REPLAY - {db} - {hours:.1f}h of data, {n_tok} tokens ever passed v0 filters, ${size:g}/trade")
+    if half:
+        mid = (span[0] + span[1]) / 2
+        trades = {rn: [x for x in v if (x["t"] < mid) == (half == 1)] for rn, v in trades.items()}
+        print(f"!! Restricted to entries in chronological HALF {half} of the data (pre-registered protocol).")
     for rn in rules:
         ts = sorted(trades[rn], key=lambda x: x["t"])
         print(f"\n=== rule {rn}: fired {fired[rn]} times, {len(ts)} with >=60m follow-up, "
               f"{unresolved[rn]} too recent to judge ===")
         summarize("all", ts)
-        if len(ts) >= 4:
+        if len(ts) >= 4 and not half:
             mid = ts[len(ts) // 2]["t"]
             summarize("first half (design)", [x for x in ts if x["t"] < mid])
             summarize("second half (test)", [x for x in ts if x["t"] >= mid])
@@ -223,4 +232,4 @@ if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     opts = dict(a.lstrip("-").split("=", 1) for a in sys.argv[1:] if a.startswith("--") and "=" in a)
     main(args[0] if args else "market-data.db", opts.get("rules", "v0,all_eligible").split(","),
-         float(opts.get("size", 25)))
+         float(opts.get("size", 25)), int(opts["half"]) if "half" in opts else None)
