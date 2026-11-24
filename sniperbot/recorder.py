@@ -15,6 +15,8 @@ Data recorded (all timestamps unix seconds, UTC):
   dex_snaps   - DexScreener best-pair snapshot: price, liquidity, FDV, volume/txns/price-change windows
   gecko_snaps - GeckoTerminal pool snapshot: buys/sells AND unique buyers/sellers/traders (wash-trading
                 signal), volume windows, reserve, locked-liquidity %
+  jup_snaps   - Jupiter token stats: holders, organic score / organic volume (wash-trading signal),
+                top-holder %, dev's previous launches, mint/freeze authority, liquidity change
   safety      - RugCheck summary (score, risks, LP locked %) at first sighting and hourly
   sol_price   - SOL/USD each cycle
   cycles      - health log: duration, counts, request errors
@@ -35,10 +37,10 @@ from typing import Any
 
 import httpx
 
-from .data.market import DEXSCREENER, GECKO, JUP_PRICE, RUGCHECK, SOL_MINT, STABLE_OR_BASE, USDC_MINT, RateLimiter
+from .data.market import DEXSCREENER, GECKO, JUP_PRICE, JUP_TOKENS, RUGCHECK, SOL_MINT, STABLE_OR_BASE, USDC_MINT, RateLimiter
 
 log = logging.getLogger("recorder")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -65,6 +67,16 @@ CREATE TABLE IF NOT EXISTS gecko_snaps (
 CREATE TABLE IF NOT EXISTS safety (
     ts REAL, mint TEXT, ok INTEGER, score REAL, score_norm REAL, lp_locked_pct REAL,
     n_risks INTEGER, danger TEXT, risks TEXT);
+CREATE TABLE IF NOT EXISTS jup_snaps (
+    ts REAL, mint TEXT, usd_price REAL, liquidity REAL, mcap REAL, holders INTEGER,
+    organic_score REAL, organic_label TEXT, mint_auth_disabled INTEGER, freeze_auth_disabled INTEGER,
+    top_holders_pct REAL, dev_mints INTEGER, dev_migrations INTEGER, launchpad TEXT, graduated_at TEXT,
+    m5_price_chg REAL, m5_holder_chg REAL, m5_liq_chg REAL, m5_buy_vol REAL, m5_sell_vol REAL,
+    m5_buy_org_vol REAL, m5_sell_org_vol REAL, m5_buys INTEGER, m5_sells INTEGER, m5_traders INTEGER,
+    m5_org_buyers INTEGER, m5_net_buyers INTEGER,
+    h1_price_chg REAL, h1_holder_chg REAL, h1_liq_chg REAL, h1_buy_vol REAL, h1_sell_vol REAL,
+    h1_buy_org_vol REAL, h1_sell_org_vol REAL, h1_traders INTEGER, h1_org_buyers INTEGER, raw BLOB);
+CREATE INDEX IF NOT EXISTS idx_jup_mint_ts ON jup_snaps(mint, ts);
 CREATE TABLE IF NOT EXISTS sol_price (ts REAL PRIMARY KEY, usd REAL);
 CREATE TABLE IF NOT EXISTS cycles (
     ts REAL PRIMARY KEY, duration REAL, discovered INTEGER, new_tokens INTEGER, tracked INTEGER,
@@ -107,6 +119,8 @@ class Tracked:
     last_dex: float = 0.0
     last_gecko: float = 0.0
     last_safety: float = 0.0
+    last_jup: float = 0.0
+    jup_count: int = 0
     dex_count: int = 0
     gecko_count: int = 0
     low_liq_since: float = 0.0
@@ -129,6 +143,9 @@ class Config:
     dex_per_min: int = 150              # DexScreener allows 300/min on pair endpoints; leave room for the bot
     gecko_per_min: int = 8              # GeckoTerminal free tier ~30/min shared with the bot
     rug_per_min: int = 20
+    jup_per_min: int = 20
+    jup_young_sec: float = 120.0
+    jup_old_sec: float = 600.0
     min_liq_detail_usd: float = 5000.0  # GeckoTerminal/RugCheck only for coins at least this liquid
 
 
@@ -138,11 +155,12 @@ class CycleStats:
     new_tokens: int = 0
     dex_snaps: int = 0
     gecko_snaps: int = 0
+    jup_snaps: int = 0
     safety_checks: int = 0
     requests: int = 0
     errors: int = 0
     rows: dict[str, list] = field(default_factory=lambda: {
-        "sightings": [], "dex_snaps": [], "gecko_snaps": [], "safety": [], "sol_price": []})
+        "sightings": [], "dex_snaps": [], "gecko_snaps": [], "safety": [], "sol_price": [], "jup_snaps": []})
 
 
 class Recorder:
@@ -160,6 +178,7 @@ class Recorder:
         self.gecko_limit = RateLimiter(self.cfg.gecko_per_min)
         self.rug_limit = RateLimiter(self.cfg.rug_per_min)
         self.jup_limit = RateLimiter(30)
+        self.jup_tok_limit = RateLimiter(self.cfg.jup_per_min)
         self.tracked: dict[str, Tracked] = {}
         self.last_discovery = 0.0
         self.stop_event = asyncio.Event()
@@ -363,6 +382,50 @@ class Recorder:
                     self._gecko_row(a, t.mint, ts, st, "multi", keep_raw=t.gecko_count % self.cfg.raw_every == 0)
                     t.gecko_count += 1
 
+    # ------------------------------------------------------------------ jupiter token stats
+    async def snapshot_jup(self, now: float, st: CycleStats, max_calls: int) -> None:
+        due = []
+        for t in self.tracked.values():
+            if t.last_liq < self.cfg.min_liq_detail_usd:
+                continue
+            young = now - t.first_seen < self.cfg.young_minutes * 60
+            if now - t.last_jup >= (self.cfg.jup_young_sec if young else self.cfg.jup_old_sec) - 1:
+                due.append(t)
+        due.sort(key=lambda t: t.last_jup)
+        due = due[:50 * max_calls]
+        chunks = [due[i:i + 50] for i in range(0, len(due), 50)]
+        results = await asyncio.gather(*(self._get_ts(JUP_TOKENS, self.jup_tok_limit, st,
+                                                      {"query": ",".join(t.mint for t in c)}) for c in chunks))
+        for chunk, (ts, data) in zip(chunks, results):
+            by_mint = {d.get("id"): d for d in data or [] if isinstance(d, dict)} if isinstance(data, list) else {}
+            for t in chunk:
+                t.last_jup = now
+                d = by_mint.get(t.mint)
+                if d:
+                    self._jup_row(t, d, ts, st)
+
+    def _jup_row(self, t: Tracked, d: dict, ts: float, st: CycleStats) -> None:
+        a, m5, h1 = d.get("audit") or {}, d.get("stats5m") or {}, d.get("stats1h") or {}
+
+        def b(x):
+            return None if x is None else int(bool(x))
+
+        st.rows["jup_snaps"].append((
+            ts, t.mint, _f(d.get("usdPrice")), _f(d.get("liquidity")), _f(d.get("mcap")), _i(d.get("holderCount")),
+            _f(d.get("organicScore")), d.get("organicScoreLabel"), b(a.get("mintAuthorityDisabled")),
+            b(a.get("freezeAuthorityDisabled")), _f(a.get("topHoldersPercentage")), _i(a.get("devMints")),
+            _i(a.get("devMigrations")), d.get("launchpad"), d.get("graduatedAt"),
+            _f(m5.get("priceChange")), _f(m5.get("holderChange")), _f(m5.get("liquidityChange")),
+            _f(m5.get("buyVolume")), _f(m5.get("sellVolume")), _f(m5.get("buyOrganicVolume")),
+            _f(m5.get("sellOrganicVolume")), _i(m5.get("numBuys")), _i(m5.get("numSells")), _i(m5.get("numTraders")),
+            _i(m5.get("numOrganicBuyers")), _i(m5.get("numNetBuyers")),
+            _f(h1.get("priceChange")), _f(h1.get("holderChange")), _f(h1.get("liquidityChange")),
+            _f(h1.get("buyVolume")), _f(h1.get("sellVolume")), _f(h1.get("buyOrganicVolume")),
+            _f(h1.get("sellOrganicVolume")), _i(h1.get("numTraders")), _i(h1.get("numOrganicBuyers")),
+            _z(d) if t.jup_count % self.cfg.raw_every == 0 else None))
+        t.jup_count += 1
+        st.jup_snaps += 1
+
     # ------------------------------------------------------------------ rugcheck
     async def safety_checks(self, now: float, st: CycleStats, max_calls: int) -> None:
         due = [t for t in self.tracked.values() if now - t.last_safety >= self.cfg.safety_recheck_sec
@@ -400,6 +463,7 @@ class Recorder:
             self.db.executemany(f"INSERT INTO dex_snaps VALUES({','.join('?' * 30)})", r["dex_snaps"])
             self.db.executemany(f"INSERT INTO gecko_snaps VALUES({','.join('?' * 27)})", r["gecko_snaps"])
             self.db.executemany("INSERT INTO safety VALUES(?,?,?,?,?,?,?,?,?)", r["safety"])
+            self.db.executemany(f"INSERT INTO jup_snaps VALUES({','.join('?' * 37)})", r["jup_snaps"])
             self.db.executemany("INSERT OR REPLACE INTO sol_price VALUES(?,?)", r["sol_price"])
             self.db.execute("INSERT OR REPLACE INTO cycles VALUES(?,?,?,?,?,?,?,?,?,?)",
                             (now, duration, st.discovered, st.new_tokens, len(self.tracked), st.dex_snaps,
@@ -415,8 +479,9 @@ class Recorder:
         cycles_per_min = max(60 / self.cfg.cycle_sec, 1)
         gecko_calls = max(int(self.cfg.gecko_per_min / cycles_per_min) - (1 if st.discovered else 0), 1)
         rug_calls = max(int(self.cfg.rug_per_min / cycles_per_min), 1)
+        jup_calls = max(int(self.cfg.jup_per_min / cycles_per_min), 1)
         sol, *_ = await asyncio.gather(jup, self.snapshot_dex(now, st), self.snapshot_gecko(now, st, gecko_calls),
-                                       self.safety_checks(now, st, rug_calls))
+                                       self.safety_checks(now, st, rug_calls), self.snapshot_jup(now, st, jup_calls))
         try:
             st.rows["sol_price"].append((sol[0], float(sol[1][SOL_MINT]["usdPrice"])))
         except (KeyError, TypeError, ValueError):
@@ -436,9 +501,9 @@ class Recorder:
                 st = await self.cycle()
                 if time.time() - last_log >= 60:
                     last_log = time.time()
-                    log.info("tracked %d | +%d new | dex %d | gecko %d | rugcheck %d | req %d | err %d | %.1fs",
-                             len(self.tracked), st.new_tokens, st.dex_snaps, st.gecko_snaps, st.safety_checks,
-                             st.requests, st.errors, time.time() - start)
+                    log.info("tracked %d | +%d new | dex %d | gecko %d | jup %d | rugcheck %d | req %d | err %d | %.1fs",
+                             len(self.tracked), st.new_tokens, st.dex_snaps, st.gecko_snaps, st.jup_snaps,
+                             st.safety_checks, st.requests, st.errors, time.time() - start)
             except Exception:
                 log.exception("cycle failed (continuing)")
             try:

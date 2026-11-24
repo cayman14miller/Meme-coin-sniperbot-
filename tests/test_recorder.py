@@ -64,6 +64,16 @@ class FakeAPI:
         elif "rugcheck" in u:
             body = {"score": 1, "score_normalised": 1, "lpLockedPct": 100,
                     "risks": [{"name": "Mutable metadata", "level": "warn"}]}
+        elif "tokens/v2/search" in u:
+            mints = dict(httpx.QueryParams(request.url.query))["query"].split(",")
+            body = [{"id": m, "usdPrice": 0.001, "liquidity": self.liq[m], "mcap": 500000, "holderCount": 321,
+                     "organicScore": 12.5, "organicScoreLabel": "low",
+                     "audit": {"mintAuthorityDisabled": True, "freezeAuthorityDisabled": True,
+                               "topHoldersPercentage": 41.0, "devMints": 1507, "devMigrations": 3},
+                     "launchpad": "pump.fun",
+                     "stats5m": {"buyVolume": 9000, "buyOrganicVolume": 300, "numTraders": 40, "numOrganicBuyers": 4,
+                                 "holderChange": -2.0, "liquidityChange": -30.0},
+                     "stats1h": {"priceChange": 250.0}} for m in mints if m in self.liq]
         elif "price/v3" in u:
             body = {SOL_MINT: {"usdPrice": 150.0}}
         else:
@@ -116,6 +126,17 @@ def test_second_cycle_gets_unique_traders_and_skips_rediscovery(tmp_path):
     multi = q(rec, "SELECT mint, buys_m5, traders_m5 FROM gecko_snaps WHERE source='multi'")
     assert set(multi) == {(A, 300, 3), (B, 300, 3)}  # 300 txns from 3 wallets = wash-trading signal
     assert len(q(rec, "SELECT 1 FROM safety")) == 2  # checked once, not re-checked within the hour
+
+
+def test_jupiter_token_stats_capture_wash_and_dev_signals(tmp_path):
+    api = FakeAPI()
+    rec = make(tmp_path, api)
+    asyncio.run(rec.cycle())  # liquidity learned
+    asyncio.run(rec.cycle())  # jupiter stats due
+    rows = q(rec, "SELECT mint, holders, organic_score, top_holders_pct, dev_mints, m5_buy_vol, m5_buy_org_vol, "
+                  "m5_liq_chg, h1_price_chg, launchpad FROM jup_snaps ORDER BY mint")
+    assert rows[0] == (A, 321, 12.5, 41.0, 1507, 9000, 300, -30.0, 250.0, "pump.fun")
+    assert len(rows) == 2
 
 
 def test_dead_coin_is_retired_and_restart_resumes(tmp_path):

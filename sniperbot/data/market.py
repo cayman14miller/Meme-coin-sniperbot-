@@ -26,6 +26,7 @@ DEXSCREENER = "https://api.dexscreener.com"
 GECKO = "https://api.geckoterminal.com/api/v2"
 RUGCHECK = "https://api.rugcheck.xyz/v1"
 JUP_PRICE = "https://lite-api.jup.ag/price/v3"
+JUP_TOKENS = "https://lite-api.jup.ag/tokens/v2/search"
 
 
 @dataclass
