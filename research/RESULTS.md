@@ -52,3 +52,20 @@ By strategy: momentum 0/5 (-13.2% avg), early 1/4 (+6.5% avg, entirely one trade
 - Needed next: an unbiased recorder of *every* candidate (not just traded ones) with forward outcomes,
   to measure base rates (how often candidates dump, by discovery source / age / features) and test
   entry rules out-of-sample; plus 5-second price logging for exit research.
+
+## Reliability & security audit (cycle 2) - no change to entry/exit decisions
+
+| # | Severity | Weakness found | Fix | Test |
+|---|---|---|---|---|
+| R1 | critical (live) | A live swap could land on-chain while our code saw an error/timeout -> tokens held with no record and no stop loss | Write-ahead `pending` position before every buy; on error the wallet balance is checked and the holding is adopted (or marked `failed`); unresolved buys are re-checked every monitor tick and on startup | `test_uncertain_live_buy_*`, `test_crash_mid_buy_is_reconciled_on_startup` |
+| R2 | high | If DexScreener returned no price for a holding, its stop loss was silently skipped forever | Jupiter price fallback (stop/TP still enforced); if no source prices it for 60s a `risk` push alert fires every 5 min | `test_missing_dexscreener_price_falls_back_to_jupiter`, `test_no_price_at_all_raises_a_risk_alert` |
+| R3 | high | Process death leaves positions unprotected, silently | launchd templates with auto-restart + caffeinate (`deploy/`); optional `HEARTBEAT_URL` dead-man's switch; startup push lists positions being re-protected | `test_decisions_and_ticks_are_logged` (heartbeat) |
+| R5 | medium | Drawdown kill switch measured in USD: SOL halving tripped it with zero trading loss (verified) | Drawdown measured in SOL | `test_sol_price_crash_does_not_trip_drawdown` |
+| R6 | medium | Dashboard bound to 0.0.0.0 over plain HTTP; unlimited token guessing | Default `HOST=127.0.0.1`; 10 failed attempts / 5 min per address -> 429 lockout | `test_dashboard_brute_force_is_rate_limited` |
+| R7 | medium (live) | `MODE=live` alone enabled real trading; dashboard could raise trade size without bound | Live requires `LIVE_TRADING_CONFIRM` phrase, env hard caps `LIVE_MAX_TRADE_SOL` / `LIVE_MAX_DEPLOYED_SOL` (not editable from dashboard), strong dashboard token | `test_live_mode_refuses_to_start_without_interlocks`, `test_live_hard_cap_blocks_oversized_trade` |
+| R10 | high (research) | No record of decisions or of the prices the bot saw | `decisions` table (every researched coin: inputs, scores, reasons, action) and `price_ticks` (every 5s monitor price + source) | `test_decisions_and_ticks_are_logged` |
+
+Known remaining gaps: no on-chain stop orders exist for these DEX pools, so protection still requires the
+process to be running; a wallet-wide scan for tokens held without any position record is not implemented
+(only buys the bot attempted are reconciled); live execution path (JupiterBroker) has never been exercised
+against mainnet and must be tested with tiny amounts only after explicit approval.

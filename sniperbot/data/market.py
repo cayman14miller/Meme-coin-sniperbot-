@@ -248,6 +248,20 @@ class MarketData:
         self._safety_cache[mint] = (time.time(), SafetyReport(not danger, score, names, reason))
         return rep
 
+    async def jup_prices(self, mints: list[str]) -> dict[str, float]:
+        """Fallback USD prices from Jupiter (any mint), used when DexScreener has no price for a holding."""
+        out: dict[str, float] = {}
+        for i in range(0, len(mints), 50):
+            data = await self._get(JUP_PRICE, self.dex_limit, {"ids": ",".join(mints[i:i + 50])})
+            for m in mints[i:i + 50]:
+                try:
+                    px = float(data[m]["usdPrice"])
+                    if px > 0:
+                        out[m] = px
+                except (KeyError, TypeError, ValueError):
+                    continue
+        return out
+
     # -- SOL price -------------------------------------------------------------
     async def sol_price(self) -> float:
         ts, px = self._sol_price

@@ -58,6 +58,31 @@ CREATE TABLE IF NOT EXISTS events (
     message TEXT
 );
 CREATE TABLE IF NOT EXISTS equity (ts REAL PRIMARY KEY, equity_usd REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    mint TEXT NOT NULL,
+    symbol TEXT,
+    pair_address TEXT,
+    action TEXT NOT NULL,
+    note TEXT,
+    strategy TEXT,
+    score REAL,
+    scores TEXT,
+    reasons TEXT,
+    metrics TEXT,
+    pair TEXT,
+    safety TEXT
+);
+CREATE TABLE IF NOT EXISTS price_ticks (
+    ts REAL NOT NULL,
+    position_id INTEGER NOT NULL,
+    price REAL,
+    liquidity_usd REAL,
+    source TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ticks_pos ON price_ticks(position_id, ts);
+CREATE INDEX IF NOT EXISTS idx_decisions_ts ON decisions(ts);
 CREATE INDEX IF NOT EXISTS idx_pos_status ON positions(status);
 CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades(ts);
 """
@@ -106,6 +131,10 @@ class Store:
     def open_positions(self) -> list[dict[str, Any]]:
         return self._rows("SELECT * FROM positions WHERE status='open' ORDER BY opened_at")
 
+    def unresolved_positions(self) -> list[dict[str, Any]]:
+        """Buys whose outcome is not known yet (process died mid-buy, or a live buy errored)."""
+        return self._rows("SELECT * FROM positions WHERE status IN ('pending','unknown') ORDER BY opened_at")
+
     def position(self, pid: int) -> dict[str, Any] | None:
         rows = self._rows("SELECT * FROM positions WHERE id=?", (pid,))
         return rows[0] if rows else None
@@ -125,6 +154,22 @@ class Store:
 
     def trades(self, limit: int = 200) -> list[dict[str, Any]]:
         return self._rows("SELECT * FROM trades ORDER BY ts DESC LIMIT ?", (limit,))
+
+    # -- research logs ---------------------------------------------------
+    def add_decision(self, **d: Any) -> None:
+        d.setdefault("ts", time.time())
+        cols = ",".join(d)
+        self._exec(f"INSERT INTO decisions({cols}) VALUES({','.join(':' + k for k in d)})", d)
+
+    def decisions(self, limit: int = 200) -> list[dict[str, Any]]:
+        return self._rows("SELECT * FROM decisions ORDER BY id DESC LIMIT ?", (limit,))
+
+    def add_ticks(self, rows: list[tuple]) -> None:
+        with self.lock:
+            self.conn.executemany("INSERT INTO price_ticks VALUES(?,?,?,?,?)", rows)
+
+    def ticks(self, position_id: int) -> list[dict[str, Any]]:
+        return self._rows("SELECT * FROM price_ticks WHERE position_id=? ORDER BY ts", (position_id,))
 
     # -- events ----------------------------------------------------------
     def add_event(self, level: str, title: str, message: str = "") -> None:

@@ -47,6 +47,10 @@ class Broker:
                    priority_fee: int, sell_all: bool = False) -> Fill:
         raise NotImplementedError
 
+    async def token_balance(self, mint: str) -> float | None:
+        """Tokens actually held (UI units), or None when the broker cannot know (paper)."""
+        return None
+
     async def close(self) -> None:
         pass
 
@@ -160,6 +164,10 @@ class JupiterBroker(Broker):
         for acc in res.get("value", []):
             total += int(acc["account"]["data"]["parsed"]["info"]["tokenAmount"]["amount"])
         return total
+
+    async def token_balance(self, mint: str) -> float | None:
+        raw = await self.token_balance_raw(mint)
+        return raw / 10 ** await self.decimals(mint)
 
     # -- swap -----------------------------------------------------------------
     async def _swap(self, input_mint: str, output_mint: str, amount_raw: int, slippage_bps: int,

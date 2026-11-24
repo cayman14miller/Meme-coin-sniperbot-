@@ -7,6 +7,7 @@ from __future__ import annotations
 import hmac
 import logging
 import secrets as pysecrets
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -41,10 +42,18 @@ def create_app(secrets: Secrets, engine: Engine | None = None, start_engine: boo
     app = FastAPI(title="Meme Coin Sniper Bot", lifespan=lifespan)
     app.state.engine = engine
 
+    failures: dict[str, list[float]] = {}
+
     def auth(request: Request) -> None:
+        ip = request.client.host if request.client else "?"
+        now = time.time()
+        recent = [t for t in failures.get(ip, []) if now - t < 300]
+        if len(recent) >= 10:  # brute-force protection: 10 wrong tokens per 5 minutes per address
+            raise HTTPException(429, "too many failed attempts - wait 5 minutes")
         header = request.headers.get("authorization", "")
         token = header[7:] if header.lower().startswith("bearer ") else ""
-        if not token or not hmac.compare_digest(token, secrets.dashboard_token):
+        if not token or not hmac.compare_digest(token.encode(), secrets.dashboard_token.encode()):
+            failures[ip] = recent + [now]
             raise HTTPException(401, "unauthorized")
 
     def eng() -> Engine:

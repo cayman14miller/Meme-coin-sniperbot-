@@ -39,8 +39,9 @@ class Engine:
         if broker is not None:
             self.broker = broker
         elif secrets.mode == "live":
-            if not secrets.solana_private_key:
-                raise SystemExit("MODE=live requires SOLANA_PRIVATE_KEY")
+            problems = secrets.live_problems()
+            if problems:
+                raise SystemExit("Live trading blocked by safety interlocks:\n  - " + "\n  - ".join(problems))
             self.broker = JupiterBroker(secrets.solana_private_key, secrets.solana_rpc_url, secrets.jupiter_api_key)
         else:
             self.broker = PaperBroker(store, self.settings.paper_starting_sol)
@@ -52,14 +53,23 @@ class Engine:
         self._last_equity_save = 0.0
         self._last_exit_check: dict[int, float] = {}
         self._last_sell_fail: dict[int, float] = {}
+        self._last_priced: dict[int, float] = {}
+        self._last_stale_alert: dict[int, float] = {}
+        self._last_heartbeat = 0.0
+        self.equity_sol = 0.0
         self._trade_lock = asyncio.Lock()
         self._tasks: list[asyncio.Task] = []
 
     # ------------------------------------------------------------------ lifecycle
     async def start(self) -> None:
+        await self.reconcile_unresolved()
+        open_pos = self.store.open_positions()
         self.notifier.send("info", f"Sniper bot online ({self.broker.mode} mode)",
                            f"Trading is {'ON' if self.settings.enabled else 'OFF'}. "
-                           f"Notifications: {', '.join(self.notifier.channels)}", push=False)
+                           f"Notifications: {', '.join(self.notifier.channels)}"
+                           + (f"\nResuming protection of {len(open_pos)} open position(s): "
+                              + ", ".join(p["symbol"] for p in open_pos) if open_pos else ""),
+                           push=bool(open_pos))
         self._tasks = [
             asyncio.create_task(self._loop(self.scan_once, lambda: self.settings.scan_interval_sec), name="scan"),
             asyncio.create_task(self._loop(self.monitor_once, lambda: self.settings.monitor_interval_sec),
@@ -105,7 +115,7 @@ class Engine:
         self.update_settings({"enabled": on})
 
     def resume_risk(self) -> None:
-        self.risk.reset(self.equity_usd)
+        self.risk.reset(self.equity_sol)
         self.notifier.send("info", "Risk lock reset", "Kill switch cleared - bot may trade again "
                            f"(trading is {'ON' if self.settings.enabled else 'OFF'}).")
 
@@ -198,14 +208,31 @@ class Engine:
             a, safety = await self.research(p)
             self.last_scan["researched"] += 1
             self.radar[p.mint] = self._radar_entry(p, a, safety)
-            if a.score >= s.min_entry_score and a.strategy != "rejected":
+            action, note = "skip", f"score {a.score:.0f} < {s.min_entry_score:g}"
+            if a.strategy == "rejected":
+                note = "; ".join(a.reasons)
+            elif a.score >= s.min_entry_score:
                 if len(self.store.open_positions()) >= s.max_open_positions:
+                    self._log_decision(p, a, safety, "skip", "max open positions reached")
                     break
-                await self.buy(p, a)
+                pid = await self.buy(p, a)
+                action, note = ("buy", f"position {pid}") if pid else ("buy_failed", "see events")
+            self._log_decision(p, a, safety, action, note)
         # keep radar small & fresh
         cutoff = time.time() - 1800
         self.radar = {k: v for k, v in sorted(self.radar.items(), key=lambda kv: -kv[1]["ts"])[:60]
                       if v["ts"] >= cutoff}
+
+    def _log_decision(self, p: PairInfo, a: Analysis, safety: dict, action: str, note: str) -> None:
+        """Every researched candidate is logged with the exact inputs behind the decision."""
+        self.store.add_decision(
+            mint=p.mint, symbol=p.symbol, pair_address=p.pair_address, action=action, note=note,
+            strategy=a.strategy, score=a.score, scores=json.dumps(a.scores), reasons=json.dumps(a.reasons),
+            metrics=json.dumps({k: round(v, 8) for k, v in a.metrics.items()}),
+            pair=json.dumps({"price_usd": p.price_usd, "liq": p.liquidity_usd, "fdv": p.fdv, "age_min": p.age_minutes,
+                             "volume": p.volume, "price_change": p.price_change, "buys": p.buys, "sells": p.sells,
+                             "boosted": p.boosted, "socials": p.has_socials}),
+            safety=json.dumps(safety))
 
     def _radar_entry(self, p: PairInfo, a: Analysis, safety: dict) -> dict[str, Any]:
         return {"ts": time.time(), "mint": p.mint, "symbol": p.symbol, "name": p.name, "url": p.url,
@@ -232,6 +259,14 @@ class Engine:
             size_usd = size_sol * self.sol_usd
             if size_sol <= 0:
                 return None
+            if self.broker.mode == "live":
+                cap = self.secrets.live_max_trade_sol
+                deployed_sol = sum(x["cost_sol"] for x in self.store.open_positions())
+                if size_sol > cap or deployed_sol + size_sol > self.secrets.live_max_deployed_sol:
+                    self.notifier.send("warning", f"Skipped {p.symbol}: live hard cap",
+                                       f"size {size_sol:.4f} SOL (cap {cap}), deployed {deployed_sol:.4f} SOL "
+                                       f"(cap {self.secrets.live_max_deployed_sol})")
+                    return None
             if self.deployed_usd() + size_usd > s.max_capital_usd:
                 self.notifier.send("warning", f"Skipped {p.symbol}: capital limit",
                                    f"deployed ${self.deployed_usd():.2f} + ${size_usd:.2f} > "
@@ -239,17 +274,24 @@ class Engine:
                 return None
             if isinstance(self.broker, PaperBroker):
                 self.broker.liquidity[p.mint] = p.liquidity_usd
+            # write-ahead record: if the process dies or the broker errors mid-buy, the attempt is not lost
+            pid = self.store.open_position(
+                mint=p.mint, symbol=p.symbol, name=p.name, pair_address=p.pair_address,
+                strategy=("manual:" if manual else "") + a.strategy, score=a.score,
+                reasons=json.dumps(a.reasons), entry_price=p.price_usd, qty=0.0, initial_qty=0.0,
+                cost_sol=size_sol, cost_usd=size_usd, mode=self.broker.mode, status="pending")
             try:
                 fill = await self.broker.buy(p.mint, size_sol, p.price_usd, self.sol_usd, s.slippage_bps,
                                              s.priority_fee_lamports)
             except Exception as exc:
+                self.store.update_position(pid, status="unknown", exit_reason=f"buy error: {str(exc)[:200]}")
                 self.notifier.send("error", f"Buy {p.symbol} failed", str(exc)[:300])
+                await self.reconcile_unresolved()
                 return None
-            pid = self.store.open_position(
-                mint=p.mint, symbol=p.symbol, name=p.name, pair_address=p.pair_address,
-                strategy=("manual:" if manual else "") + a.strategy, score=a.score,
-                reasons=json.dumps(a.reasons), entry_price=fill.price_usd, qty=fill.qty,
-                cost_sol=fill.sol, cost_usd=fill.sol * self.sol_usd, mode=self.broker.mode)
+            self.store.update_position(pid, status="open", entry_price=fill.price_usd, qty=fill.qty,
+                                       initial_qty=fill.qty, peak_price=fill.price_usd, last_price=fill.price_usd,
+                                       cost_sol=fill.sol, cost_usd=fill.sol * self.sol_usd)
+            self._last_priced[pid] = time.time()
             self.store.add_trade(position_id=pid, side="buy", mint=p.mint, symbol=p.symbol, price=fill.price_usd,
                                  qty=fill.qty, sol=fill.sol, usd=fill.sol * self.sol_usd, reason=a.summary,
                                  tx=fill.tx, mode=self.broker.mode)
@@ -316,6 +358,38 @@ class Engine:
                 n += 1
         return n
 
+    # ------------------------------------------------------------------ recovery
+    async def reconcile_unresolved(self) -> None:
+        """Resolve buys with unknown outcome by checking what the wallet actually holds.
+
+        A live swap can land on-chain even though our code saw an error or timeout. Without this, those
+        tokens would sit in the wallet with no stop loss and no record.
+        """
+        for pos in self.store.unresolved_positions():
+            try:
+                held = await self.broker.token_balance(pos["mint"])
+            except Exception as exc:
+                self.notifier.send("error", f"Cannot verify buy of {pos['symbol']} (will retry)", str(exc)[:200],
+                                   push=time.time() - self._last_stale_alert.get(-pos["id"], 0) > 300)
+                self._last_stale_alert[-pos["id"]] = time.time()
+                continue
+            if held is None:  # paper: an errored buy never changes holdings
+                self.store.update_position(pos["id"], status="failed", closed_at=time.time())
+            elif held > 0:
+                price = pos["entry_price"]
+                pairs = await self.market.pairs_for([pos["mint"]])
+                if pos["mint"] in pairs:
+                    price = pairs[pos["mint"]].price_usd or price
+                self.store.update_position(pos["id"], status="open", qty=held, initial_qty=held, entry_price=price,
+                                           peak_price=price, last_price=price,
+                                           exit_reason="adopted after uncertain buy (entry price estimated)")
+                self._last_priced[pos["id"]] = time.time()
+                self.notifier.send("warning", f"Recovered {pos['symbol']} position after uncertain buy",
+                                   f"Wallet holds {held:g} tokens; now protected by stop loss. "
+                                   f"Entry price estimated at ${price:.8g}.")
+            else:
+                self.store.update_position(pos["id"], status="failed", closed_at=time.time())
+
     # ------------------------------------------------------------------ monitoring
     async def refresh_account(self) -> None:
         px = await self.market.sol_price()
@@ -328,16 +402,38 @@ class Engine:
         holdings = sum(p["qty"] * (p["last_price"] or p["entry_price"]) for p in self.store.open_positions())
         if self.sol_usd:
             self.equity_usd = self.balance_sol * self.sol_usd + holdings
+            self.equity_sol = self.balance_sol + holdings / self.sol_usd
 
     async def monitor_once(self) -> None:
+        if self.store.unresolved_positions():
+            await self.reconcile_unresolved()
         positions = self.store.open_positions()
         if positions:
-            pairs = await self.market.pairs_for(list({p["mint"] for p in positions}))
+            mints = list({p["mint"] for p in positions})
+            pairs = await self.market.pairs_for(mints)
+            missing = [m for m in mints if m not in pairs or pairs[m].price_usd <= 0]
+            fallback = await self.market.jup_prices(missing) if missing else {}
+            now = time.time()
+            ticks = []
             for pos in positions:
                 pair = pairs.get(pos["mint"])
-                if not pair or pair.price_usd <= 0:
+                if pair and pair.price_usd > 0:
+                    price, source = pair.price_usd, "dexscreener"
+                elif pos["mint"] in fallback:
+                    price, source = fallback[pos["mint"]], "jupiter"
+                else:
+                    self._alert_unpriced(pos, now)
                     continue
-                price = pair.price_usd
+                self._last_priced[pos["id"]] = now
+                ticks.append((now, pos["id"], price, pair.liquidity_usd if pair else None, source))
+                if not pair:  # stop/TP rules still apply on the fallback price; chart exits need pair data
+                    peak = max(pos["peak_price"], price)
+                    self.store.update_position(pos["id"], last_price=price, peak_price=peak)
+                    pos.update(last_price=price, peak_price=peak)
+                    decision = evaluate_exit(pos, price, self.settings)
+                    if decision.fraction > 0:
+                        await self.sell(pos, decision.fraction, decision.reason + " [fallback price]", price)
+                    continue
                 if isinstance(self.broker, PaperBroker):
                     self.broker.liquidity[pos["mint"]] = pair.liquidity_usd
                 peak = max(pos["peak_price"], price)
@@ -353,18 +449,41 @@ class Engine:
                     sig = exit_signal(pair, candles, pos["entry_price"])
                     if sig.exit:
                         await self.sell(pos, 1.0, f"chart exit: {sig.reason}", price)
+            if ticks:
+                self.store.add_ticks(ticks)
         await self.refresh_account()
+        await self._heartbeat()
         if not self.equity_usd:
             return
         if time.time() - self._last_equity_save > 60:
             self.store.add_equity(self.equity_usd)
             self._last_equity_save = time.time()
-        reason = self.risk.check(self.equity_usd, self.settings)
+        reason = self.risk.check(self.equity_sol, self.settings)
         if reason:
             self.risk.trip(reason)
             self.notifier.send("risk", "RISK LIMIT TRIPPED - trading halted",
                                f"{reason}\nNo new trades until you press 'Resume' in the dashboard "
                                "(or send /resume). Open positions remain protected by stop losses.")
+
+    def _alert_unpriced(self, pos: dict, now: float) -> None:
+        """A holding with no price means its stop loss is NOT being evaluated - say so loudly."""
+        last = self._last_priced.setdefault(pos["id"], now)
+        if now - last >= 60 and now - self._last_stale_alert.get(pos["id"], 0) >= 300:
+            self._last_stale_alert[pos["id"]] = now
+            self.notifier.send("risk", f"NO PRICE for {pos['symbol']} for {now - last:.0f}s",
+                               "Its stop loss cannot be evaluated until a price source responds. "
+                               "Consider selling manually from the dashboard.")
+
+    async def _heartbeat(self) -> None:
+        """Ping a dead-man's-switch URL so an outside service can alert if the bot stops."""
+        url = self.secrets.heartbeat_url
+        if not url or time.time() - self._last_heartbeat < 60:
+            return
+        self._last_heartbeat = time.time()
+        try:
+            await self.market.client.get(url, timeout=10)
+        except Exception as exc:  # never let monitoring break trading
+            log.warning("heartbeat failed: %s", exc)
 
     # ------------------------------------------------------------------ dashboard
     async def investigate(self, mint: str) -> dict[str, Any]:
@@ -385,7 +504,7 @@ class Engine:
         if self.store.open_positions():
             raise ValueError("close open positions first")
         self.broker.reset(self.settings.paper_starting_sol)
-        self.store.set("peak_equity", 0)
+        self.store.set("peak_equity_sol", 0)
         self.notifier.send("info", "Paper wallet reset", f"{self.settings.paper_starting_sol} SOL", push=False)
 
     async def manual_buy(self, mint: str) -> dict[str, Any]:
@@ -415,7 +534,8 @@ class Engine:
             "enabled": self.settings.enabled,
             "risk": {"tripped": self.risk.tripped, "reason": self.risk.trip_reason,
                      "tripped_at": self.store.get("risk_tripped_at"),
-                     "peak_equity": self.store.get("peak_equity", 0)},
+                     "peak_equity": float(self.store.get("peak_equity_sol", 0) or 0) * self.sol_usd},
+            "unresolved": self.store.unresolved_positions(),
             "account": {"sol_usd": self.sol_usd, "balance_sol": self.balance_sol, "equity_usd": self.equity_usd,
                         "deployed_usd": self.deployed_usd(), "trade_size_sol": self.trade_size_sol()},
             "stats": {"all": self.store.stats(), "today": self.store.stats(start_of_day_utc(now))},

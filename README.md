@@ -57,9 +57,20 @@ Open **http://localhost:8000** and sign in with your `DASHBOARD_TOKEN`. Press **
 
 Use the **Send test** button in the dashboard to check that notifications work.
 
+### Run it unattended on a Mac (auto-restart)
+`deploy/com.sniperbot.paper.plist` and `deploy/com.sniperbot.recorder.plist` are launchd templates that restart the
+bot/recorder if they crash and keep the Mac awake. Edit the paths inside, copy them to `~/Library/LaunchAgents/` and
+`launchctl load` them. Set `HEARTBEAT_URL` (e.g. a free healthchecks.io check) to get alerted if the bot stops.
+
+### Market recorder (research data)
+`python -m sniperbot.recorder --db market-data.db` records every coin the scanner can see (not just the ones the bot
+buys) and follows each for 6 hours. It never trades. `python research/universe_study.py market-data.db` turns that
+into base rates and forward outcomes. Research results are logged in `research/RESULTS.md`.
+
 ### Going live (real money)
 1. Create a **new** Solana wallet just for the bot and fund it with a small amount of SOL.
-2. In `.env`, set `MODE=live`, set `SOLANA_PRIVATE_KEY` to that wallet's base58 key (or its JSON byte array), and set a **paid RPC** in `SOLANA_RPC_URL`, such as Helius, QuickNode, or Triton. The public RPC is rate-limited and slow.
+2. In `.env`, set `MODE=live`, `LIVE_TRADING_CONFIRM=I_ACCEPT_REAL_FUNDS_RISK`, hard caps `LIVE_MAX_TRADE_SOL` and
+   `LIVE_MAX_DEPLOYED_SOL` (the bot refuses to start live without all of them), set `SOLANA_PRIVATE_KEY` to that wallet's base58 key (or its JSON byte array), and set a **paid RPC** in `SOLANA_RPC_URL`, such as Helius, QuickNode, or Triton. The public RPC is rate-limited and slow.
 3. Restart. The header shows a red **LIVE** badge. Swaps go through the Jupiter aggregator and are signed locally. Your key never leaves the machine.
 
 ---

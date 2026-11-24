@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS launchd job: runs the market recorder (never trades), restarts it if it crashes, keeps the Mac awake.
+  Replace /PATH/TO/PROJECT, then:
+     cp deploy/com.sniperbot.recorder.plist ~/Library/LaunchAgents/
+     launchctl load ~/Library/LaunchAgents/com.sniperbot.recorder.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.sniperbot.recorder</string>
+  <key>WorkingDirectory</key><string>/PATH/TO/PROJECT</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/caffeinate</string><string>-i</string>
+    <string>/PATH/TO/PROJECT/.venv/bin/python</string><string>-m</string><string>sniperbot.recorder</string>
+    <string>--db</string><string>market-data.db</string>
+  </array>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>/PATH/TO/PROJECT/logs/recorder.log</string>
+  <key>StandardErrorPath</key><string>/PATH/TO/PROJECT/logs/recorder.log</string>
+</dict>
+</plist>

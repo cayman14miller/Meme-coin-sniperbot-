@@ -30,7 +30,7 @@ def load_dotenv(path: str | os.PathLike = ".env") -> None:
 @dataclass
 class Secrets:
     dashboard_token: str = ""
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"  # local only by default; use a tunnel for phone access
     port: int = 8000
     db_path: str = "sniperbot.db"
     mode: str = "paper"  # paper | live
@@ -42,13 +42,35 @@ class Secrets:
     discord_webhook_url: str = ""
     ntfy_topic: str = ""
     ntfy_server: str = "https://ntfy.sh"
+    # live-trading interlocks: MODE=live alone is not enough
+    live_confirm: str = ""
+    live_max_trade_sol: float = 0.0     # hard cap per buy, cannot be raised from the dashboard
+    live_max_deployed_sol: float = 0.0  # hard cap on total SOL in open positions
+    heartbeat_url: str = ""             # optional dead-man's-switch ping (e.g. healthchecks.io)
+
+    LIVE_CONFIRM_PHRASE = "I_ACCEPT_REAL_FUNDS_RISK"
+
+    def live_problems(self) -> list[str]:
+        """Reasons live trading must not start (empty list = interlocks satisfied)."""
+        probs = []
+        if not self.solana_private_key:
+            probs.append("SOLANA_PRIVATE_KEY is not set")
+        if self.live_confirm != self.LIVE_CONFIRM_PHRASE:
+            probs.append(f"LIVE_TRADING_CONFIRM must equal {self.LIVE_CONFIRM_PHRASE}")
+        if self.live_max_trade_sol <= 0:
+            probs.append("LIVE_MAX_TRADE_SOL must be > 0")
+        if self.live_max_deployed_sol <= 0:
+            probs.append("LIVE_MAX_DEPLOYED_SOL must be > 0")
+        if not self.dashboard_token or len(self.dashboard_token) < 16:
+            probs.append("DASHBOARD_TOKEN must be set and at least 16 characters")
+        return probs
 
     @classmethod
     def from_env(cls) -> "Secrets":
         e = os.environ.get
         return cls(
             dashboard_token=e("DASHBOARD_TOKEN", ""),
-            host=e("HOST", "0.0.0.0"),
+            host=e("HOST", "127.0.0.1"),
             port=int(e("PORT", "8000")),
             db_path=e("DB_PATH", "sniperbot.db"),
             mode=e("MODE", "paper").lower(),
@@ -60,6 +82,10 @@ class Secrets:
             discord_webhook_url=e("DISCORD_WEBHOOK_URL", ""),
             ntfy_topic=e("NTFY_TOPIC", ""),
             ntfy_server=e("NTFY_SERVER", "https://ntfy.sh"),
+            live_confirm=e("LIVE_TRADING_CONFIRM", ""),
+            live_max_trade_sol=float(e("LIVE_MAX_TRADE_SOL", "0") or 0),
+            live_max_deployed_sol=float(e("LIVE_MAX_DEPLOYED_SOL", "0") or 0),
+            heartbeat_url=e("HEARTBEAT_URL", ""),
         )
 
 

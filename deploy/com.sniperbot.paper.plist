@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS launchd job: runs the bot in PAPER mode, restarts it if it crashes, keeps the Mac awake.
+  1. Replace every /PATH/TO/PROJECT with your project folder (absolute path).
+  2. Put a long random DASHBOARD_TOKEN below.
+  3. cp deploy/com.sniperbot.paper.plist ~/Library/LaunchAgents/
+     launchctl load ~/Library/LaunchAgents/com.sniperbot.paper.plist
+  Stop:  launchctl unload ~/Library/LaunchAgents/com.sniperbot.paper.plist
+  Logs:  /PATH/TO/PROJECT/logs/bot.log
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.sniperbot.paper</string>
+  <key>WorkingDirectory</key><string>/PATH/TO/PROJECT</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/caffeinate</string><string>-i</string>
+    <string>/PATH/TO/PROJECT/.venv/bin/python</string><string>main.py</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>MODE</key><string>paper</string>
+    <key>SOLANA_PRIVATE_KEY</key><string></string>
+    <key>HOST</key><string>127.0.0.1</string>
+    <key>DB_PATH</key><string>paper-v1.db</string>
+    <key>DASHBOARD_TOKEN</key><string>REPLACE_WITH_LONG_RANDOM_TOKEN</string>
+  </dict>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>/PATH/TO/PROJECT/logs/bot.log</string>
+  <key>StandardErrorPath</key><string>/PATH/TO/PROJECT/logs/bot.log</string>
+</dict>
+</plist>

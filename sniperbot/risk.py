@@ -71,21 +71,22 @@ class RiskManager:
         self.store.set("risk_reason", reason)
         self.store.set("risk_tripped_at", time.time())
 
-    def reset(self, equity_usd: float) -> None:
+    def reset(self, equity_sol: float) -> None:
         self.store.set("risk_tripped", False)
         self.store.set("risk_reason", "")
         # fresh baselines so the same hole doesn't immediately re-trip it
-        self.store.set("peak_equity", equity_usd)
+        self.store.set("peak_equity_sol", equity_sol)
         self.store.set("risk_reset_at", time.time())
 
-    def update_peak(self, equity_usd: float) -> float:
-        peak = float(self.store.get("peak_equity", 0) or 0)
-        if equity_usd > peak:
-            peak = equity_usd
-            self.store.set("peak_equity", peak)
+    def update_peak(self, equity_sol: float) -> float:
+        peak = float(self.store.get("peak_equity_sol", 0) or 0)
+        if equity_sol > peak:
+            peak = equity_sol
+            self.store.set("peak_equity_sol", peak)
         return peak
 
-    def check(self, equity_usd: float, s: Settings) -> str | None:
+    def check(self, equity_sol: float, s: Settings) -> str | None:
+        """Drawdown is measured in SOL so SOL's own price moves neither trip nor mask it."""
         """Return a reason string if the kill switch should trip."""
         if self.tripped:
             return None
@@ -93,11 +94,11 @@ class RiskManager:
         daily = self.store.stats(since)["realized_pnl_usd"]
         if s.max_daily_loss_usd > 0 and daily <= -s.max_daily_loss_usd:
             return f"daily loss ${-daily:.2f} hit limit ${s.max_daily_loss_usd:.2f}"
-        peak = self.update_peak(equity_usd)
+        peak = self.update_peak(equity_sol)
         if peak > 0 and s.max_drawdown_pct > 0:
-            dd = (equity_usd - peak) / peak * 100
+            dd = (equity_sol - peak) / peak * 100
             if dd <= -s.max_drawdown_pct:
-                return f"drawdown {dd:.1f}% from peak ${peak:.2f} (limit -{s.max_drawdown_pct:g}%)"
+                return f"drawdown {dd:.1f}% from peak {peak:.3f} SOL (limit -{s.max_drawdown_pct:g}%)"
         if s.max_consecutive_losses > 0:
             reset_at = float(self.store.get("risk_reset_at", 0) or 0)
             streak = self._losses_since(reset_at)
