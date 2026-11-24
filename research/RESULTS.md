@@ -190,3 +190,18 @@ What the run does show (descriptive, n is large only for all_eligible):
 - Medians are negative for every rule (-6% to -9%): a few winners carry the means. Win rates 36-40%.
 - Only stable, large effect: the unfiltered eligible universe loses ~28%/trade (both runs, n=160).
 - Decision deferred until pooled v1 n >= 30 (amendment in HYPOTHESES.md). Run 5 recording next.
+
+### Pooled out-of-sample - INTERIM look 2 (runs 3-5, 5.6 h fresh data) - v1 n=18 < 30, no decision
+
+| Rule | trades | win | mean net | median | 90% CI | mean net, costs +50% |
+|---|---|---|---|---|---|---|
+| v0 | 27 | 33% | -2.5% | -12.6% | [-11.9%, +7.0%] | -3.6% |
+| v1 | 18 | 28% | -0.6% | -13.0% | [-11.0%, +11.6%] | -1.6% |
+| v1_filters_only | 23 | 26% | -1.5% | -13.0% | [-10.8%, +9.2%] | -2.6% |
+| all v0-eligible | 235 | 27% | **-28.3%** | -20.5% | [-34.9%, -21.6%] | -29.1% |
+
+- v1's lead over v0 shrank from ~7 pp (interim 1) to ~2 pp - regression toward v0, as expected for noise.
+- All scored rules sit near zero expectancy with negative medians (~-13%: the typical trade is stopped out;
+  a few trail/TP2 winners pay for them). No evidence of an edge in either direction.
+- The scoring + RugCheck layer is worth ~25 pp/trade vs buying the filtered universe - stable in all 3 runs.
+- Run 5: 28/94 cycles had 1 failed request (~1-2% of requests); missing snapshots can only delay exits.
