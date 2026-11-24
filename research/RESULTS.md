@@ -176,3 +176,17 @@ What the run does show (descriptive, n is large only for all_eligible):
 - Sample-size arithmetic: v0/v1 fire ~3-4 resolvable trades per recorded hour, so >= 30 trades needs roughly
   8-10 hours of recording, and a CI narrow enough to separate +3% from 0 needs several hundred trades (multi-day).
   Next: keep recording fresh runs (run 4 started 09:47 UTC) and pool all post-registration runs for one evaluation.
+
+### Pooled out-of-sample - INTERIM look (runs 3 + 4, 3.7 h fresh data) - cannot pass v1, n < 30
+
+| Rule | trades | win | mean net | 90% CI | mean net, costs +50% |
+|---|---|---|---|---|---|
+| v0 | 15 | 40% | -4.8% | [-18.1%, +9.3%] | -5.9% |
+| v1 | 11 | 36% | +2.1% | [-10.0%, +16.1%] | +1.1% |
+| v1_filters_only | 14 | 36% | +3.1% | [-7.9%, +16.4%] | +2.1% |
+| all v0-eligible | 160 | 28% | **-27.9%** | [-35.7%, -20.0%] | -28.7% |
+
+- v1 is ~7 pp ahead of v0 on the point estimate, but the CIs overlap almost entirely; at n=11 this is noise-level.
+- Medians are negative for every rule (-6% to -9%): a few winners carry the means. Win rates 36-40%.
+- Only stable, large effect: the unfiltered eligible universe loses ~28%/trade (both runs, n=160).
+- Decision deferred until pooled v1 n >= 30 (amendment in HYPOTHESES.md). Run 5 recording next.
