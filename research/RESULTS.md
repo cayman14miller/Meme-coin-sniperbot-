@@ -205,3 +205,17 @@ What the run does show (descriptive, n is large only for all_eligible):
   a few trail/TP2 winners pay for them). No evidence of an edge in either direction.
 - The scoring + RugCheck layer is worth ~25 pp/trade vs buying the filtered universe - stable in all 3 runs.
 - Run 5: 28/94 cycles had 1 failed request (~1-2% of requests); missing snapshots can only delay exits.
+
+### Pooled out-of-sample - INTERIM look 3 (runs 3-6, 7.5 h fresh data) - v1 n=22 < 30, no decision
+
+| Rule | trades | win | mean net | median | 90% CI | mean net, costs +50% |
+|---|---|---|---|---|---|---|
+| v0 | 36 | 28% | **-6.9%** | -13.5% | [-15.8%, +1.7%] | -8.0% [-17.0%, +0.6%] |
+| v1 | 22 | 27% | -1.3% | -13.4% | [-10.2%, +8.6%] | -2.4% |
+| v1_filters_only | 31 | 29% | -1.6% | -12.5% | [-8.8%, +6.6%] | -2.6% |
+| all v0-eligible | 283 | 28% | **-26.5%** | -17.6% | [-32.6%, -20.5%] | -27.4% |
+
+- v0 (the code currently paper-trading on the user's Mac) is drifting clearly negative: -6.9%/trade, CI upper
+  bound only +1.7%. Consistent with the frozen v0 baseline (-12.6%, n=10).
+- v1 is ~5.6 pp ahead of v0 but its own expectancy is ~-1%, CI [-10%, +9%]: no evidence of an edge.
+- Run 6: 20/92 cycles had 1 failed request.
