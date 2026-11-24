@@ -1,0 +1,8 @@
+fastapi>=0.110
+uvicorn>=0.29
+httpx>=0.27
+# Only needed for LIVE trading (signing Solana transactions):
+solders>=0.21
+base58>=2.1
+# Tests
+pytest>=8

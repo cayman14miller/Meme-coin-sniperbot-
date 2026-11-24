@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<title>Sniper Bot Control</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--line:#2a2f3a;--text:#e6e8ee;--muted:#8a91a3;
+  --green:#3ddc97;--red:#ff5c6c;--amber:#ffb547;--blue:#5aa9ff;--r:12px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+a{color:var(--blue)}
+header{position:sticky;top:0;z-index:5;background:rgba(15,17,21,.95);backdrop-filter:blur(6px);border-bottom:1px solid var(--line);
+  padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header h1{font-size:16px;margin:0;flex:1;white-space:nowrap}
+main{max-width:1280px;margin:0 auto;padding:16px;display:grid;gap:16px}
+.pill{padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;border:1px solid var(--line)}
+.on{background:rgba(61,220,151,.15);color:var(--green);border-color:rgba(61,220,151,.4)}
+.off{background:rgba(138,145,163,.12);color:var(--muted)}
+.live{background:rgba(255,92,108,.15);color:var(--red);border-color:rgba(255,92,108,.4)}
+.paper{background:rgba(90,169,255,.12);color:var(--blue);border-color:rgba(90,169,255,.35)}
+button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:8px 14px}
+button:hover{border-color:#3c4250}
+button.primary{background:var(--green);color:#06140d;border-color:var(--green);font-weight:700}
+button.danger{background:transparent;color:var(--red);border-color:rgba(255,92,108,.5)}
+button.big{padding:10px 20px;font-weight:700}
+button.sm{padding:4px 9px;font-size:12px}
+button:disabled{opacity:.5;cursor:not-allowed}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;min-width:0}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.grid{display:grid;gap:16px}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.kpi .v{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+.kpi .l{color:var(--muted);font-size:12px}
+.two{grid-template-columns:2fr 1fr;align-items:start}
+@media(max-width:900px){.two{grid-template-columns:1fr}}
+.pos{color:var(--green)} .neg{color:var(--red)} .mut{color:var(--muted)}
+.tbl{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:top}
+th{color:var(--muted);font-weight:500;font-size:12px}
+td.wrap{white-space:normal;min-width:220px;max-width:420px;color:var(--muted);font-size:12px}
+.risk{display:none;background:rgba(255,92,108,.12);border:1px solid rgba(255,92,108,.5);border-radius:var(--r);padding:14px;
+  align-items:center;gap:12px;flex-wrap:wrap}
+.risk.show{display:flex}
+.risk b{color:var(--red)}
+.events{max-height:360px;overflow:auto;display:grid;gap:6px}
+.ev{padding:7px 9px;border-radius:8px;background:var(--panel2);font-size:12px}
+.ev .t{font-weight:600}
+.ev.risk-l{border-left:3px solid var(--red)} .ev.win{border-left:3px solid var(--green)}
+.ev.loss{border-left:3px solid var(--red)} .ev.error{border-left:3px solid var(--amber)}
+.ev.trade{border-left:3px solid var(--blue)} .ev.warning{border-left:3px solid var(--amber)}
+form.settings{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 14px}
+fieldset{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0;display:grid;gap:8px;grid-column:1/-1;
+  grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
+legend{color:var(--muted);font-size:12px;padding:0 6px}
+label{display:grid;gap:3px;font-size:12px;color:var(--muted)}
+label.chk{display:flex;align-items:center;gap:8px;color:var(--text)}
+input,select{font:inherit;background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:7px 9px;width:100%;min-width:0}
+input[type=checkbox]{width:auto}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.score{display:inline-block;min-width:34px;text-align:center;border-radius:6px;padding:1px 6px;font-weight:700}
+#login{max-width:380px;margin:12vh auto;display:grid;gap:12px}
+canvas{width:100%;height:180px;display:block}
+.tabs{display:flex;gap:6px}
+.tabs button.active{border-color:var(--blue);color:var(--blue)}
+.hidden{display:none!important}
+small{color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="login" class="card hidden">
+  <h2>Sniper Bot — sign in</h2>
+  <input id="tok" type="password" placeholder="Dashboard token (DASHBOARD_TOKEN)" autocomplete="current-password">
+  <button class="primary" onclick="login()">Open control panel</button>
+  <small id="loginErr" class="neg"></small>
+</div>
+
+<div id="app" class="hidden">
+<header>
+  <h1>🎯 Sniper Bot</h1>
+  <span id="modePill" class="pill">—</span>
+  <span id="statusPill" class="pill">—</span>
+  <button id="toggleBtn" class="big" onclick="toggle()">—</button>
+  <button class="danger sm" onclick="panic()" title="Turn off and sell every open position">Panic sell all</button>
+</header>
+<main>
+  <div id="riskBanner" class="risk">
+    <div style="flex:1">🛑 <b>Risk kill switch tripped — trading halted.</b><br><span id="riskReason"></span></div>
+    <button class="primary" onclick="resumeRisk()">Reset &amp; allow trading</button>
+  </div>
+
+  <section class="grid kpis">
+    <div class="card kpi"><div class="l">Equity</div><div class="v" id="kEq">—</div><div class="l" id="kEqSub"></div></div>
+    <div class="card kpi"><div class="l">Wallet</div><div class="v" id="kSol">—</div><div class="l" id="kSolSub"></div></div>
+    <div class="card kpi"><div class="l">Today P&amp;L</div><div class="v" id="kToday">—</div><div class="l" id="kTodaySub"></div></div>
+    <div class="card kpi"><div class="l">All-time P&amp;L</div><div class="v" id="kAll">—</div><div class="l" id="kAllSub"></div></div>
+    <div class="card kpi"><div class="l">Wins / Losses</div><div class="v" id="kWL">—</div><div class="l" id="kWLSub"></div></div>
+    <div class="card kpi"><div class="l">Deployed</div><div class="v" id="kDep">—</div><div class="l" id="kDepSub"></div></div>
+  </section>
+
+  <section class="grid two">
+    <div class="card"><h2>Equity (7d)</h2><canvas id="eq"></canvas></div>
+    <div class="card"><h2>Notifications <button class="sm" onclick="testNotif()">Send test</button></h2>
+      <div id="events" class="events"></div></div>
+  </section>
+
+  <section class="card">
+    <h2>Open positions <small id="posCount"></small></h2>
+    <div class="tbl"><table><thead><tr><th>Token</th><th>Strategy</th><th>Entry</th><th>Now</th><th>Change</th>
+      <th>Value</th><th>P&amp;L</th><th>Stop</th><th>Held</th><th></th></tr></thead><tbody id="posBody"></tbody></table></div>
+  </section>
+
+  <section class="card">
+    <h2>Radar — coins the bot researched <small id="scanInfo"></small></h2>
+    <div class="row" style="margin-bottom:10px">
+      <input id="mintIn" placeholder="Paste a Solana token mint to investigate" style="flex:1;min-width:220px">
+      <button onclick="investigate()">Investigate</button>
+      <button class="primary" onclick="manualBuy()">Buy now</button>
+    </div>
+    <div id="invOut" class="mut" style="margin-bottom:10px"></div>
+    <div class="tbl"><table><thead><tr><th>Score</th><th>Token</th><th>Strategy</th><th>Liq</th><th>5m vol</th>
+      <th>5m / 1h</th><th>B/S</th><th>Age</th><th>Safety</th><th>Why</th></tr></thead><tbody id="radarBody"></tbody></table></div>
+  </section>
+
+  <section class="card">
+    <h2><span>History</span><span class="tabs"><button class="sm active" id="tabClosed" onclick="tab('closed')">Closed trades</button>
+      <button class="sm" id="tabFills" onclick="tab('fills')">All fills</button></span></h2>
+    <div class="tbl" id="closedWrap"><table><thead><tr><th>Closed</th><th>Token</th><th>Strategy</th><th>Cost</th><th>Return</th>
+      <th>P&amp;L</th><th>Result</th><th>Exit reason</th></tr></thead><tbody id="closedBody"></tbody></table></div>
+    <div class="tbl hidden" id="fillsWrap"><table><thead><tr><th>Time</th><th>Side</th><th>Token</th><th>Price</th><th>SOL</th>
+      <th>USD</th><th>Tx</th><th>Reason</th></tr></thead><tbody id="fillsBody"></tbody></table></div>
+  </section>
+
+  <section class="card">
+    <h2>Settings <span class="row"><small id="setMsg"></small><button class="primary sm" onclick="saveSettings()">Save settings</button></span></h2>
+    <form class="settings" id="setForm" onsubmit="event.preventDefault();saveSettings()">
+      <fieldset><legend>Trade size &amp; budget</legend>
+        <label>Amount per trade<input name="trade_size" type="number" step="any"></label>
+        <label>Unit<select name="trade_unit"><option>USD</option><option>SOL</option></select></label>
+        <label>Max capital deployed (USD)<input name="max_capital_usd" type="number" step="any"></label>
+        <label>Max open positions<input name="max_open_positions" type="number"></label>
+        <label>Paper starting SOL<input name="paper_starting_sol" type="number" step="any"></label>
+      </fieldset>
+      <fieldset><legend>Exits</legend>
+        <label>Stop loss %<input name="stop_loss_pct" type="number" step="any"></label>
+        <label>Take profit 1 % (sell half)<input name="take_profit_pct" type="number" step="any"></label>
+        <label>Take profit 2 % (sell rest)<input name="take_profit_2_pct" type="number" step="any"></label>
+        <label>Trailing stop % from peak<input name="trailing_stop_pct" type="number" step="any"></label>
+        <label>Trailing activates at +%<input name="trailing_activate_pct" type="number" step="any"></label>
+        <label>Max hold (minutes)<input name="max_hold_minutes" type="number"></label>
+        <label class="chk"><input name="use_signal_exits" type="checkbox"> Exit on bearish chart signals</label>
+      </fieldset>
+      <fieldset><legend>Risk kill switch</legend>
+        <label>Max daily loss (USD)<input name="max_daily_loss_usd" type="number" step="any"></label>
+        <label>Max drawdown from peak %<input name="max_drawdown_pct" type="number" step="any"></label>
+        <label>Max losing streak<input name="max_consecutive_losses" type="number"></label>
+        <label>Cooldown after a loss (min)<input name="cooldown_minutes_after_loss" type="number"></label>
+      </fieldset>
+      <fieldset><legend>Strategies &amp; entry</legend>
+        <label class="chk"><input name="enable_early" type="checkbox"> Early launches</label>
+        <label class="chk"><input name="enable_momentum" type="checkbox"> Momentum</label>
+        <label class="chk"><input name="enable_dip" type="checkbox"> Dip buys</label>
+        <label class="chk"><input name="enable_breakout" type="checkbox"> Breakouts</label>
+        <label>Min entry score (0-100)<input name="min_entry_score" type="number" step="any"></label>
+        <label class="chk"><input name="require_safety_check" type="checkbox"> Require RugCheck safety pass</label>
+        <label>Max RugCheck risk score<input name="max_rugcheck_score" type="number"></label>
+      </fieldset>
+      <fieldset><legend>Coin filters</legend>
+        <label>Min liquidity USD<input name="min_liquidity_usd" type="number" step="any"></label>
+        <label>Max liquidity USD<input name="max_liquidity_usd" type="number" step="any"></label>
+        <label>Min 5m volume USD<input name="min_volume_5m_usd" type="number" step="any"></label>
+        <label>Min pair age (min)<input name="min_pair_age_minutes" type="number" step="any"></label>
+        <label>Max pair age (hours)<input name="max_pair_age_hours" type="number" step="any"></label>
+        <label>Min 5m buy/sell ratio<input name="min_buy_sell_ratio" type="number" step="any"></label>
+        <label>Max FDV USD<input name="max_fdv_usd" type="number" step="any"></label>
+      </fieldset>
+      <fieldset><legend>Execution</legend>
+        <label>Max slippage (bps)<input name="slippage_bps" type="number"></label>
+        <label>Max priority fee (lamports)<input name="priority_fee_lamports" type="number"></label>
+        <label>Scan every (sec)<input name="scan_interval_sec" type="number"></label>
+        <label>Check positions every (sec)<input name="monitor_interval_sec" type="number"></label>
+      </fieldset>
+    </form>
+    <div class="row" style="margin-top:12px"><button class="sm" id="paperReset" onclick="paperReset()">Reset paper wallet</button>
+      <button class="sm" onclick="logout()">Sign out</button><small id="chanInfo"></small></div>
+  </section>
+</main>
+</div>
+
+<script>
+let TOKEN = localStorage.getItem('sniper_token') || '';
+let S = null, settingsDirty = false;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const usd = (n, sign) => (n == null || isNaN(n)) ? '—' : (sign && n > 0 ? '+' : '') + (n < 0 ? '-' : '') + '$' + Math.abs(n).toLocaleString(undefined, {maximumFractionDigits: Math.abs(n) < 10 ? 2 : 0, minimumFractionDigits: Math.abs(n) < 10 ? 2 : 0});
+const px = n => !n ? '—' : '$' + (n >= 1 ? n.toFixed(4) : n.toPrecision(4));
+const cls = n => n > 0 ? 'pos' : n < 0 ? 'neg' : 'mut';
+const ago = ts => { const s = Date.now()/1000 - ts; return s < 60 ? Math.floor(s)+'s' : s < 3600 ? Math.floor(s/60)+'m' : s < 86400 ? (s/3600).toFixed(1)+'h' : (s/86400).toFixed(1)+'d'; };
+const time = ts => new Date(ts*1000).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+const scoreColor = s => s >= 70 ? 'background:rgba(61,220,151,.2);color:var(--green)' : s >= 45 ? 'background:rgba(255,181,71,.18);color:var(--amber)' : 'background:var(--panel2);color:var(--muted)';
+
+async function api(path, body) {
+  const r = await fetch(path, {method: body === undefined ? 'GET' : 'POST',
+    headers: {'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json'},
+    body: body === undefined ? undefined : JSON.stringify(body)});
+  if (r.status === 401) { showLogin('Wrong token'); throw new Error('unauthorized'); }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || r.statusText);
+  return data;
+}
+function showLogin(err) { $('app').classList.add('hidden'); $('login').classList.remove('hidden'); $('loginErr').textContent = err || ''; }
+async function login() { TOKEN = $('tok').value.trim(); localStorage.setItem('sniper_token', TOKEN); await refresh(true); }
+function logout() { localStorage.removeItem('sniper_token'); TOKEN=''; showLogin(); }
+$('tok').addEventListener('keydown', e => e.key === 'Enter' && login());
+
+async function refresh(first) {
+  try { S = await api('/api/state'); } catch (e) { return; }
+  $('login').classList.add('hidden'); $('app').classList.remove('hidden');
+  render(); if (first || !settingsDirty) fillSettings();
+}
+
+function render() {
+  const a = S.account, st = S.stats;
+  $('modePill').className = 'pill ' + S.mode; $('modePill').textContent = S.mode === 'live' ? 'LIVE' : 'PAPER';
+  $('statusPill').className = 'pill ' + (S.risk.tripped ? 'live' : S.enabled ? 'on' : 'off');
+  $('statusPill').textContent = S.risk.tripped ? 'RISK LOCKED' : S.enabled ? 'TRADING ON' : 'TRADING OFF';
+  const btn = $('toggleBtn'); btn.textContent = S.enabled ? 'Turn OFF' : 'Turn ON';
+  btn.className = 'big ' + (S.enabled ? 'danger' : 'primary'); btn.disabled = S.risk.tripped && !S.enabled;
+  $('riskBanner').classList.toggle('show', S.risk.tripped);
+  $('riskReason').textContent = S.risk.reason + (S.risk.tripped_at ? ` (at ${time(S.risk.tripped_at)})` : '');
+
+  $('kEq').textContent = usd(a.equity_usd); $('kEqSub').textContent = 'peak ' + usd(S.risk.peak_equity);
+  $('kSol').textContent = a.balance_sol.toFixed(3) + ' SOL'; $('kSolSub').textContent = 'SOL ' + usd(a.sol_usd);
+  $('kToday').innerHTML = `<span class="${cls(st.today.realized_pnl_usd)}">${usd(st.today.realized_pnl_usd, 1)}</span>`;
+  $('kTodaySub').textContent = `${st.today.wins}W / ${st.today.losses}L today · limit -${usd(S.settings.max_daily_loss_usd)}`;
+  $('kAll').innerHTML = `<span class="${cls(st.all.realized_pnl_usd)}">${usd(st.all.realized_pnl_usd, 1)}</span>`;
+  $('kAllSub').textContent = `best ${usd(st.all.best_usd,1)} · worst ${usd(st.all.worst_usd,1)}`;
+  $('kWL').innerHTML = `<span class="pos">${st.all.wins}</span> / <span class="neg">${st.all.losses}</span>`;
+  $('kWLSub').textContent = `${st.all.win_rate.toFixed(0)}% win rate` + (st.all.profit_factor ? ` · PF ${st.all.profit_factor.toFixed(2)}` : '');
+  $('kDep').textContent = usd(a.deployed_usd); $('kDepSub').textContent = `of ${usd(S.settings.max_capital_usd)} max · ${a.trade_size_sol.toFixed(3)} SOL/trade`;
+
+  $('posCount').textContent = `${S.positions.length}/${S.settings.max_open_positions}`;
+  $('posBody').innerHTML = S.positions.map(p => `<tr>
+    <td><b>${esc(p.symbol)}</b><br><small><a href="https://dexscreener.com/solana/${esc(p.pair_address)}" target="_blank" rel="noopener">chart</a></small></td>
+    <td>${esc(p.strategy)} <small>(${(p.score||0).toFixed(0)})</small></td><td>${px(p.entry_price)}</td><td>${px(p.last_price)}</td>
+    <td class="${cls(p.change_pct)}">${p.change_pct.toFixed(1)}%</td><td>${usd(p.value_usd)}</td>
+    <td class="${cls(p.unrealized_usd)}">${usd(p.unrealized_usd, 1)}</td><td>${px(p.stop_price)}</td><td>${ago(p.opened_at)}</td>
+    <td><button class="sm" onclick="sellPos(${p.id},0.5)">Sell 50%</button> <button class="sm danger" onclick="sellPos(${p.id},1)">Sell</button></td></tr>`).join('')
+    || '<tr><td colspan="10" class="mut">No open positions</td></tr>';
+
+  const ls = S.last_scan;
+  $('scanInfo').textContent = ls.ts ? `last scan ${ago(ls.ts)} ago · ${ls.discovered} found · ${ls.passed_filters} passed filters · ${ls.researched} researched` : 'waiting for first scan (turn trading ON)';
+  $('radarBody').innerHTML = S.radar.map(r => `<tr>
+    <td><span class="score" style="${scoreColor(r.score)}">${r.score.toFixed(0)}</span></td>
+    <td><b>${esc(r.symbol)}</b><br><small><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.mint.slice(0,6))}…</a></small></td>
+    <td>${esc(r.strategy)}</td><td>${usd(r.liquidity_usd)}</td><td>${usd(r.vol_m5)}</td>
+    <td><span class="${cls(r.chg_m5)}">${r.chg_m5.toFixed(0)}%</span> / <span class="${cls(r.chg_h1)}">${r.chg_h1.toFixed(0)}%</span></td>
+    <td>${r.bs_ratio.toFixed(2)}</td><td>${r.age_min < 120 ? r.age_min.toFixed(0)+'m' : (r.age_min/60).toFixed(0)+'h'}</td>
+    <td>${!r.safety.checked ? '<span class="mut">skip</span>' : r.safety.ok ? '<span class="pos">ok</span>' : '<span class="neg">fail</span>'}</td>
+    <td class="wrap">${esc((r.reasons||[]).join(' · '))}</td></tr>`).join('')
+    || '<tr><td colspan="10" class="mut">Nothing researched yet</td></tr>';
+
+  $('closedBody').innerHTML = S.closed.map(p => { const pnl = p.realized_usd - p.cost_usd; return `<tr>
+    <td>${time(p.closed_at)}</td><td><b>${esc(p.symbol)}</b></td><td>${esc(p.strategy)}</td><td>${usd(p.cost_usd)}</td><td>${usd(p.realized_usd)}</td>
+    <td class="${cls(pnl)}">${usd(pnl,1)} <small>(${p.cost_usd ? (pnl/p.cost_usd*100).toFixed(1) : 0}%)</small></td>
+    <td>${pnl > 0 ? '<span class="pill on">WIN</span>' : '<span class="pill live">LOSS</span>'}</td><td class="wrap">${esc(p.exit_reason)}</td></tr>`; }).join('')
+    || '<tr><td colspan="8" class="mut">No closed trades yet</td></tr>';
+  $('fillsBody').innerHTML = S.trades.map(t => `<tr><td>${time(t.ts)}</td>
+    <td class="${t.side === 'buy' ? 'pos' : 'neg'}">${t.side.toUpperCase()}</td><td>${esc(t.symbol)}</td><td>${px(t.price)}</td>
+    <td>${(t.sol||0).toFixed(4)}</td><td>${usd(t.usd)}</td>
+    <td>${t.tx && !t.tx.startsWith('paper') ? `<a href="https://solscan.io/tx/${esc(t.tx)}" target="_blank" rel="noopener">view</a>` : '<span class="mut">paper</span>'}</td>
+    <td class="wrap">${esc(t.reason)}</td></tr>`).join('') || '<tr><td colspan="8" class="mut">No fills yet</td></tr>';
+
+  $('events').innerHTML = S.events.map(e => `<div class="ev ${e.level === 'risk' ? 'risk-l' : esc(e.level)}">
+    <div class="t">${esc(e.title)} <small>${ago(e.ts)} ago</small></div>${e.message ? `<div style="white-space:pre-wrap">${esc(e.message)}</div>` : ''}</div>`).join('');
+  $('chanInfo').textContent = 'Notification channels: ' + S.channels.join(', ');
+  $('paperReset').classList.toggle('hidden', S.mode !== 'paper');
+  drawEquity();
+}
+
+function drawEquity() {
+  const c = $('eq'), d = S.equity, dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight; c.width = w*dpr; c.height = h*dpr;
+  const g = c.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0,0,w,h);
+  if (d.length < 2) { g.fillStyle = '#8a91a3'; g.fillText('Equity history appears after the bot has run a few minutes', 8, h/2); return; }
+  const ys = d.map(p => p.equity_usd), min = Math.min(...ys), max = Math.max(...ys), pad = (max-min)*0.1 || 1;
+  const X = i => 40 + (w-48) * i/(d.length-1), Y = v => 8 + (h-24) * (1 - (v-(min-pad))/((max+pad)-(min-pad)));
+  g.strokeStyle = '#2a2f3a'; g.fillStyle = '#8a91a3'; g.font = '11px system-ui';
+  [min, (min+max)/2, max].forEach(v => { g.beginPath(); g.moveTo(40, Y(v)); g.lineTo(w, Y(v)); g.stroke(); g.fillText('$'+v.toFixed(0), 0, Y(v)+4); });
+  const up = ys[ys.length-1] >= ys[0]; g.strokeStyle = up ? '#3ddc97' : '#ff5c6c'; g.lineWidth = 2; g.beginPath();
+  d.forEach((p,i) => i ? g.lineTo(X(i), Y(p.equity_usd)) : g.moveTo(X(i), Y(p.equity_usd))); g.stroke();
+}
+
+function fillSettings() {
+  const f = $('setForm');
+  for (const [k, v] of Object.entries(S.settings)) { const el = f.elements[k]; if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = v; }
+  settingsDirty = false;
+}
+$('setForm').addEventListener('input', () => { settingsDirty = true; $('setMsg').textContent = 'unsaved changes'; });
+
+async function saveSettings() {
+  const f = $('setForm'), body = {};
+  for (const el of f.elements) if (el.name) body[el.name] = el.type === 'checkbox' ? el.checked : el.value;
+  try { const r = await api('/api/settings', body); settingsDirty = false;
+    $('setMsg').textContent = r.changed.length ? 'saved: ' + r.changed.join(', ') : 'no changes'; await refresh(true);
+  } catch (e) { $('setMsg').textContent = '⚠ ' + e.message; }
+}
+async function toggle() { try { await api('/api/toggle', {enabled: !S.enabled}); } catch (e) { alert(e.message); } refresh(); }
+async function resumeRisk() { if (!confirm('Reset the risk lock? The bot will be allowed to trade again.')) return; await api('/api/risk/reset', {}); refresh(); }
+async function panic() { if (!confirm('Turn trading OFF and market-sell ALL open positions?')) return;
+  try { const r = await api('/api/sell-all', {}); alert(`Sold ${r.sold} positions`); } catch (e) { alert(e.message); } refresh(); }
+async function sellPos(id, fraction) { if (!confirm(`Sell ${fraction*100}% of this position?`)) return;
+  try { await api(`/api/positions/${id}/sell`, {fraction}); } catch (e) { alert(e.message); } refresh(); }
+async function testNotif() { const r = await api('/api/test-notification', {}); alert('Sent to: ' + r.channels.join(', ')); refresh(); }
+async function paperReset() { if (!confirm('Reset paper wallet to starting SOL?')) return; try { await api('/api/paper/reset', {}); } catch (e) { alert(e.message); } refresh(); }
+async function investigate() {
+  const mint = $('mintIn').value.trim(); $('invOut').textContent = 'Researching…';
+  try { const r = await api('/api/investigate', {mint});
+    if (r.error) { $('invOut').textContent = r.error; return; }
+    $('invOut').innerHTML = `<b>${esc(r.symbol)}</b> score <span class="score" style="${scoreColor(r.score)}">${r.score.toFixed(0)}</span> (${esc(r.strategy)}) ·
+      ${r.passes_filters ? '<span class="pos">passes filters</span>' : '<span class="neg">filtered: ' + esc(r.filter_reason) + '</span>'} ·
+      ${r.would_buy ? '<b class="pos">BOT WOULD BUY</b>' : '<span class="mut">bot would not buy</span>'}<br>
+      <small>${esc(Object.entries(r.scores||{}).map(([k,v]) => k+' '+v.toFixed(0)).join(' · '))}</small><br>
+      <small>${esc((r.reasons||[]).join(' · '))}</small>
+      ${r.safety.checked && r.safety.risks.length ? '<br><small>Risks: ' + esc(r.safety.risks.join(', ')) + '</small>' : ''}`;
+    refresh();
+  } catch (e) { $('invOut').textContent = '⚠ ' + e.message; }
+}
+async function manualBuy() {
+  const mint = $('mintIn').value.trim(); if (!mint || !confirm('Buy this token now with your configured trade size?')) return;
+  try { await api('/api/buy', {mint}); $('invOut').textContent = 'Bought.'; } catch (e) { $('invOut').textContent = '⚠ ' + e.message; } refresh();
+}
+function tab(which) { $('closedWrap').classList.toggle('hidden', which !== 'closed'); $('fillsWrap').classList.toggle('hidden', which !== 'fills');
+  $('tabClosed').classList.toggle('active', which === 'closed'); $('tabFills').classList.toggle('active', which === 'fills'); }
+window.addEventListener('resize', () => S && drawEquity());
+
+if (TOKEN) refresh(true); else showLogin();
+setInterval(() => TOKEN && refresh(), 4000);
+</script>
+</body>
+</html>
