@@ -61,3 +61,18 @@ lower bound > 0 with costs +50%). Run 1 half 2 is excluded (no resolvable rule e
 ### Outcome (2026-11-24 ~21:15 UTC): v1 formally evaluated on runs 3-7 - better than v0 on the point estimate
 (+3.4 pp, not statistically established), NOT profitable (CI lower bound -8.7%). Not deployed. Per protocol, v1 is
 not re-tuned on this data; any new rule must be registered before it sees fresh data (run 8 onward).
+
+## Replication test of v0 by forward paper trading - registered 2026-11-27, before the run starts
+
+Motivation: Mac paper run 1 (98 trades) showed v0 at +4.3%/trade after cost correction, CI [-2.4%, +11.1%].
+Test: a NEW paper run with the current code (realistic fills from live Jupiter quotes, calibrated costs,
+liquidity-pull exits), v0 strategy and all risk settings unchanged, new database. Kill-switch trips are resumed
+manually as before (no automatic restarts).
+
+* Primary metric: mean net P&L % per closed trade (as booked by the quote-based paper broker).
+* v0 counts as **replicated-profitable** only if, at >= 200 closed trades, the mean is > 0 AND the 90% bootstrap
+  CI lower bound is > 0, AND the mean stays > 0 with costs +50% (each trade minus an extra 50% of its fees+impact),
+  AND the mean without the best 5 trades is > 0.
+* Interim looks before 200 trades are reported but cannot pass. No parameter changes during the run; if anything
+  is changed, the run restarts with a new database and the count restarts.
+* Live trading is not considered before this passes, and then only with the user's explicit approval and tiny size.

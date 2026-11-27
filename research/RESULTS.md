@@ -250,3 +250,35 @@ decision rule, and its CI also spans zero. Promoting it now would be choosing th
 **What this establishes (high confidence, n=349):** buying what passes v0's static filters loses ~25%/trade;
 the scoring + RugCheck layer removes most of that loss. **What it does not establish:** any positive edge.
 Every scored rule is consistent with zero to slightly negative expectancy after realistic costs.
+
+## Forward paper run on the user's Mac - `paper-run2-20261124.db` (v0 code as downloaded, old paper fill model)
+
+98 trades, 2026-11-24 04:56 -> 11-25 15:14 UTC (~34 h of trading; then halted by the kill switch until the
+run ended 11-27 07:09). $25/trade. Data: report pasted by the user (per-trade P&L %), analysed in this session.
+
+| Cut | n | win | mean/trade | median | 90% bootstrap CI |
+|---|---|---|---|---|---|
+| as booked (old paper costs ~1.0% round trip) | 98 | 43% | **+5.5%** | -7.5% | [-1.1%, +12.3%] |
+| costs corrected to calibrated ~2.25% round trip | 98 | 42% | +4.3% | -8.8% | [-2.4%, +11.1%] |
+| corrected, costs +50% | 98 | 41% | +3.2% | -9.9% | [-3.4%, +10.1%] |
+| without the best 3 trades (as booked) | 95 | 41% | +1.8% | -8.7% | [-4.2%, +7.9%] |
+| without the best 5 trades (as booked) | 93 | 40% | -0.1% | -11.0% | [-5.9%, +5.5%] |
+| chronological 1st half / 2nd half | 49 / 49 | 45% / 41% | +4.7% / +6.3% | | both CIs span 0 |
+| first trade per token only | 56 | 39% | +2.6% | -11.5% | [-7.2%, +12.6%] |
+
+Booked total: **+$135.45** (42 wins / 56 losses). By exit: 50 stop-loss exits averaged **-22.7%** (20 gapped
+past -20%, avg -39%; two near-total rugs -99.5% / -98.5%), 28 trailing exits +25.7%, 9 TP2 exits +97.6%.
+Kill switch tripped 3x on "5 losses in a row" (11-24 05:44, 11-24 12:31, 11-25 15:14); resumed manually twice.
+
+**Interpretation**
+- First forward evidence that v0 *may* have a small positive expectancy, but it is **not established**: every CI
+  includes 0, and the result rests on ~5 trades of +85% to +151% (removing them -> ~0%).
+- **Paper vs replay disagree** for the same strategy and the same hours (paper ~+10%/trade, replay v0 -4.7%).
+  Trade-level matching shows why: the two fire on the same coins at *different minutes* (live data vs
+  reconstructed candles), and the outcome flips with the entry minute - e.g. DUVAL: paper bought 10:31 before a
+  +120% move (+104%), replay bought 10:37 at the top (stopped, -25%); Slingoor: replay 18:53 (stopped),
+  paper 19:03 (+151%). The replay is therefore not a faithful emulator of the live bot's timing, and the strategy's
+  result is very sensitive to entry timing (high variance). Forward paper trading is the more direct measure.
+- The paper fills are optimistic: costs understated (~1.25 pp/trade, corrected above), fills at the DexScreener
+  price with no route check, stale-price rug exposure.
+- The 10% stop is really a ~23% average loss on this universe because of gaps between polls.
